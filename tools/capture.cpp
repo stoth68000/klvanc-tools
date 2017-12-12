@@ -26,6 +26,7 @@
 #include "version.h"
 #include "DeckLinkAPI.h"
 #include "ts_packetizer.h"
+#include "histogram.h"
 
 #define WIDE 80
 
@@ -71,6 +72,16 @@ Decklink Hardware supported modes:
 [decklink @ 0x25da300] Mode: 12 HD 720p 59.94            68703539 [hp59]
 [decklink @ 0x25da300] Mode: 13 HD 720p 60               68703630 [hp60]
 */
+
+/* Signal Monitoring */
+static int g_monitorSignalStability = 0;
+static int g_hist_print_interval = 60;
+static struct ltn_histogram_s *hist_arrival_interval = NULL;
+static struct ltn_histogram_s *hist_arrival_interval_video = NULL;
+static struct ltn_histogram_s *hist_arrival_interval_audio = NULL;
+static struct ltn_histogram_s *hist_audio_sfc = NULL;
+static struct ltn_histogram_s *hist_format_change = NULL;
+/* End Signal Monitoring */
 
 static struct klvanc_context_s *vanchdl;
 static pthread_mutex_t sleepMutex;
@@ -429,8 +440,16 @@ static void *thread_func_draw(void *p)
 
 static void signal_handler(int signum)
 {
-	pthread_cond_signal(&sleepCond);
-	g_shutdown = 1;
+	if (signum == SIGUSR1) {
+		ltn_histogram_interval_print(STDOUT_FILENO, hist_arrival_interval, 0);
+		ltn_histogram_interval_print(STDOUT_FILENO, hist_arrival_interval_video, 0);
+		ltn_histogram_interval_print(STDOUT_FILENO, hist_arrival_interval_audio, 0);
+		ltn_histogram_interval_print(STDOUT_FILENO, hist_audio_sfc, 0);
+		ltn_histogram_interval_print(STDOUT_FILENO, hist_format_change, 0);
+	} else {
+		pthread_cond_signal(&sleepCond);
+		g_shutdown = 1;
+	}
 }
 
 static void showMemory(FILE * fd)
@@ -774,6 +793,28 @@ ULONG DeckLinkCaptureDelegate::Release(void)
 	return (ULONG) m_refCount;
 }
 
+static void monitorSignal(IDeckLinkVideoInputFrame *videoFrame, IDeckLinkAudioInputPacket *audioFrame)
+{
+	ltn_histogram_interval_update(hist_arrival_interval);
+
+	if (videoFrame)
+		ltn_histogram_interval_update(hist_arrival_interval_video);
+
+	if (audioFrame) {
+		ltn_histogram_interval_update(hist_arrival_interval_audio);
+
+		uint32_t sfc = audioFrame->GetSampleFrameCount();
+		ltn_histogram_update_with_timevalue(hist_audio_sfc, sfc);
+
+	}
+
+	ltn_histogram_interval_print(STDOUT_FILENO, hist_arrival_interval, g_hist_print_interval);
+	ltn_histogram_interval_print(STDOUT_FILENO, hist_arrival_interval_video, g_hist_print_interval);
+	ltn_histogram_interval_print(STDOUT_FILENO, hist_arrival_interval_audio, g_hist_print_interval);
+	ltn_histogram_interval_print(STDOUT_FILENO, hist_audio_sfc, g_hist_print_interval);
+	ltn_histogram_interval_print(STDOUT_FILENO, hist_format_change, g_hist_print_interval);
+}
+
 HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame *videoFrame, IDeckLinkAudioInputPacket *audioFrame)
 {
 	if (g_shutdown == 1) {
@@ -782,6 +823,9 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 	}
 	if (g_shutdown == 2)
 		return S_OK;
+
+	if (g_monitorSignalStability)
+		monitorSignal(videoFrame, audioFrame);
 
 	IDeckLinkVideoFrame *rightEyeFrame = NULL;
 	IDeckLinkVideoFrame3DExtensions *threeDExtensions = NULL;
@@ -1094,6 +1138,8 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 
 HRESULT DeckLinkCaptureDelegate::VideoInputFormatChanged(BMDVideoInputFormatChangedEvents events, IDeckLinkDisplayMode * mode, BMDDetectedVideoInputFormatFlags)
 {
+	ltn_histogram_update_with_timevalue(hist_format_change, 1);
+
 	g_detected_mode_id = mode->GetDisplayMode();
 	return S_OK;
 }
@@ -1240,6 +1286,9 @@ static int usage(const char *progname, int status)
 		"    -I <filename>   Interpret and display input VANC filename (See -V)\n"
 		"    -l <linenr>     During -I parse, process a specific line# (def: 0 all)\n"
 		"    -L              List available display modes\n"
+		"    -Q              Monitor frame arrival times and various signal conditions\n"
+		"                    (Don't combine this with any recording on VANC monitoring)\n"
+		"                    Trigger console stats output via kill -s SIGUSR1 `pidof klvanc_capture`\n"
 		"    -c <channels>   Audio Channels (2, 8 or 16 - def: 2)\n"
 		"    -s <depth>      Audio Sample Depth (16 or 32 - def: 16)\n"
 		"    -n <frames>     Number of frames to capture (def: unlimited)\n"
@@ -1294,7 +1343,13 @@ static int _main(int argc, char *argv[])
 	pthread_mutex_init(&sleepMutex, NULL);
 	pthread_cond_init(&sleepCond, NULL);
 
-	while ((ch = getopt(argc, argv, "?h3c:s:f:a:m:n:p:t:vV:I:i:l:LP:MS")) != -1) {
+	ltn_histogram_alloc_video_defaults(&hist_arrival_interval, "A/V arrival intervals");
+	ltn_histogram_alloc_video_defaults(&hist_arrival_interval_video, "video arrival intervals");
+	ltn_histogram_alloc_video_defaults(&hist_arrival_interval_audio, "audio arrival intervals");
+	ltn_histogram_alloc_video_defaults(&hist_audio_sfc, "audio sfc");
+	ltn_histogram_alloc_video_defaults(&hist_format_change, "video format change");
+
+	while ((ch = getopt(argc, argv, "?h3c:s:f:a:m:n:p:t:vV:I:i:l:LP:QMS")) != -1) {
 		switch (ch) {
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 		case 'S':
@@ -1302,6 +1357,9 @@ static int _main(int argc, char *argv[])
 			g_prbs_initialized = 0;
 			break;
 #endif
+		case 'Q':
+			g_monitorSignalStability = 1;
+			break;
 		case 'm':
 			g_videoModeIndex = atoi(optarg);
 			break;
@@ -1541,6 +1599,7 @@ static int _main(int argc, char *argv[])
 	}
 
 	signal(SIGINT, signal_handler);
+	signal(SIGUSR1, signal_handler);
 
 #if HAVE_CURSES_H
 	if (g_monitor_mode) {
@@ -1591,6 +1650,12 @@ bail:
 	RELEASE_IF_NOT_NULL(deckLinkInput);
 	RELEASE_IF_NOT_NULL(deckLink);
 	RELEASE_IF_NOT_NULL(deckLinkIterator);
+
+	ltn_histogram_free(hist_arrival_interval);
+	ltn_histogram_free(hist_arrival_interval_video);
+	ltn_histogram_free(hist_arrival_interval_audio);
+	ltn_histogram_free(hist_audio_sfc);
+	ltn_histogram_free(hist_format_change);
 
 	return exitStatus;
 }
