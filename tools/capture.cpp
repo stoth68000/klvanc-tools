@@ -446,6 +446,14 @@ static void signal_handler(int signum)
 		ltn_histogram_interval_print(STDOUT_FILENO, hist_arrival_interval_audio, 0);
 		ltn_histogram_interval_print(STDOUT_FILENO, hist_audio_sfc, 0);
 		ltn_histogram_interval_print(STDOUT_FILENO, hist_format_change, 0);
+	} else
+	if (signum == SIGUSR2) {
+		printf("Stats manually reset via SIGUSR2\n");
+		ltn_histogram_reset(hist_arrival_interval);
+		ltn_histogram_reset(hist_arrival_interval_video);
+		ltn_histogram_reset(hist_arrival_interval_audio);
+		ltn_histogram_reset(hist_audio_sfc);
+		ltn_histogram_reset(hist_format_change);
 	} else {
 		pthread_cond_signal(&sleepCond);
 		g_shutdown = 1;
@@ -824,8 +832,10 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 	if (g_shutdown == 2)
 		return S_OK;
 
-	if (g_monitorSignalStability)
+	if (g_monitorSignalStability) {
 		monitorSignal(videoFrame, audioFrame);
+		return S_OK;
+	}
 
 	IDeckLinkVideoFrame *rightEyeFrame = NULL;
 	IDeckLinkVideoFrame3DExtensions *threeDExtensions = NULL;
@@ -1289,6 +1299,7 @@ static int usage(const char *progname, int status)
 		"    -Q              Monitor frame arrival times and various signal conditions\n"
 		"                    (Don't combine this with any recording on VANC monitoring)\n"
 		"                    Trigger console stats output via kill -s SIGUSR1 `pidof klvanc_capture`\n"
+		"                    Reset  console stats via kill -s SIGUSR2 `pidof klvanc_capture`\n"
 		"    -c <channels>   Audio Channels (2, 8 or 16 - def: 2)\n"
 		"    -s <depth>      Audio Sample Depth (16 or 32 - def: 16)\n"
 		"    -n <frames>     Number of frames to capture (def: unlimited)\n"
@@ -1600,6 +1611,7 @@ static int _main(int argc, char *argv[])
 
 	signal(SIGINT, signal_handler);
 	signal(SIGUSR1, signal_handler);
+	signal(SIGUSR2, signal_handler);
 
 #if HAVE_CURSES_H
 	if (g_monitor_mode) {
