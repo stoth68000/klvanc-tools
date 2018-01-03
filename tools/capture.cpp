@@ -1487,6 +1487,7 @@ static int _main(int argc, char *argv[])
 
 	/* We specifically want to see packets that have bad checksums. */
 	vanchdl->allow_bad_checksums = 1;
+	vanchdl->warn_on_decode_failure = 1;
 	vanchdl->verbose = g_verbose;
 	vanchdl->callbacks = &callbacks;
 
