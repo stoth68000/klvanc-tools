@@ -17,6 +17,8 @@
 #include <signal.h>
 #include <libklvanc/vanc.h>
 #include <libklvanc/smpte2038.h>
+#include "smpte337_detector.h"
+#include "frame-writer.h"
 
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 #include <libklmonitoring/klmonitoring.h>
@@ -83,11 +85,15 @@ static struct ltn_histogram_s *hist_audio_sfc = NULL;
 static struct ltn_histogram_s *hist_format_change = NULL;
 /* End Signal Monitoring */
 
+static BMDDisplayMode selectedDisplayMode = bmdModeNTSC;
 static struct klvanc_context_s *vanchdl;
 static pthread_mutex_t sleepMutex;
 static pthread_cond_t sleepCond;
 static int videoOutputFile = -1;
 static int audioOutputFile = -1;
+
+static struct fwr_session_s *writeSession = NULL;
+
 static int vancOutputFile = -1;
 static int g_showStartupMemory = 0;
 static int g_verbose = 0;
@@ -107,12 +113,16 @@ static IDeckLinkDisplayModeIterator *displayModeIterator;
 
 static BMDTimecodeFormat g_timecodeFormat = 0;
 static int g_videoModeIndex = -1;
-static uint32_t g_audioChannels = 2;
-static uint32_t g_audioSampleDepth = 16;
+static uint32_t g_audioChannels = 16;
+static uint32_t g_audioSampleDepth = 32;
 static const char *g_videoOutputFilename = NULL;
 static const char *g_audioOutputFilename = NULL;
+static const char *g_audioInputFilename = NULL;
 static const char *g_vancOutputFilename = NULL;
 static const char *g_vancInputFilename = NULL;
+static const char *g_muxedOutputFilename = NULL;
+static const char *g_muxedInputFilename = NULL;
+static struct fwr_session_s *muxedSession = NULL;
 static int g_maxFrames = -1;
 static int g_shutdown = 0;
 static int g_monitor_reset = 0;
@@ -120,6 +130,8 @@ static int g_monitor_mode = 0;
 static int g_no_signal = 1;
 static BMDDisplayMode g_detected_mode_id = 0;
 static BMDDisplayMode g_requested_mode_id = 0;
+
+static int g_enable_smpte337_detector = 0;
 
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 static int g_monitor_prbs_audio_mode = 0;
@@ -149,8 +161,8 @@ static void dumpAudio(uint16_t *ptr, int fc, int num_channels)
 #endif
 
 #if HAVE_CURSES_H
-pthread_t threadId;
-//static struct vanc_cache_s *selected = 0;
+static pthread_t g_monitor_draw_threadId;
+static pthread_t g_monitor_input_threadId;
 
 static void cursor_expand_all()
 {
@@ -504,6 +516,176 @@ static const char *display_mode_to_string(BMDDisplayMode m)
 	return &g_mode[0];
 }
 
+static void *smpte337_callback(void *user_context, struct smpte337_detector_s *ctx, uint8_t datamode, uint8_t datatype, uint32_t payload_bitCount, uint8_t *payload)
+{
+	printf("%s() mode: %d  type: %d\n", __func__, datamode, datatype);
+	return 0;
+}
+
+static int AnalyzeMuxed(const char *fn)
+{
+	struct fwr_session_s *session;
+	if (fwr_session_file_open(fn, 0, &session) < 0) {
+		fprintf(stderr, "Error opening %s\n", fn);
+		return -1;
+	}
+
+	struct fwr_header_audio_s *fa;
+	struct fwr_header_video_s *fv;
+	struct fwr_header_timing_s ft, ftlast;
+	struct fwr_header_vanc_s *fd;
+	uint32_t header;
+
+	while (1) {
+		fa = 0, fv = 0;
+
+		if (fwr_session_frame_peek(session, &header) < 0) {
+			break;
+		}
+
+		if (header == timing_v1_header) {
+			ftlast = ft;
+			if (fwr_timing_frame_read(session, &ft) < 0) {
+				break;
+			}
+			struct timeval diff;
+			fwr_timeval_subtract(&diff, &ft.ts1, &ftlast.ts1);
+
+			printf("timing: counter %" PRIu64 "  mode:%s  ts:%d.%06d  timestamp_interval:%d.%06d\n",
+				ft.counter,
+				display_mode_to_string(ft.decklinkCaptureMode),
+				ft.ts1.tv_sec,
+				ft.ts1.tv_usec,
+				diff.tv_sec,
+				diff.tv_usec);
+		} else
+		if (header == video_v1_header) {
+			if (fwr_video_frame_read(session, &fv) < 0) {
+				fprintf(stderr, "No more video?\n");
+				break;
+			}
+			printf("\tvideo: %d x %d  strideBytes: %d  bufferLengthBytes: %d\n",
+				fv->width, fv->height, fv->strideBytes, fv->bufferLengthBytes);
+		} else
+		if (header == VANC_SOL_INDICATOR) {
+			if (fwr_vanc_frame_read(session, &fd) < 0) {
+				fprintf(stderr, "No more vanc?\n");
+				break;
+			}
+			printf("\t\tvanc: line: %4d -- ", fd->line);
+			for (int i = 0; i < 16; i++)
+				printf("%02x ", *(fd->ptr + i));
+			printf("\n");
+		} else
+		if (header == audio_v1_header) {
+			if (fwr_pcm_frame_read(session, &fa) < 0) {
+				break;
+			}
+			printf("\taudio: channels: %d  depth: %d  frameCount: %d  bufferLengthBytes: %d\n",
+				fa->channelCount,
+				fa->sampleDepth,
+				fa->frameCount,
+				fa->bufferLengthBytes);
+		}
+
+		if (fa) {
+			fwr_pcm_frame_free(session, fa);
+			fa = 0;
+		}
+		if (fv) {
+			fwr_video_frame_free(session, fv);
+			fv = 0;
+		}
+	}
+
+	fwr_session_file_close(session);
+}
+
+static int AnalyzeAudio(const char *fn)
+{
+	struct fwr_session_s *session;
+	if (fwr_session_file_open(fn, 0, &session) < 0) {
+		fprintf(stderr, "Error opening %s\n", fn);
+		return -1;
+	}
+
+	uint32_t frame = 0;
+
+	struct smpte337_detector_s *det[8] = { 0 };
+	FILE *ofh[8] = { 0 };
+
+	for (int i = 0; i < 8; i++) {
+		if (g_enable_smpte337_detector) {
+			det[i] = smpte337_detector_alloc((smpte337_detector_callback)smpte337_callback, (void *)det[i]);
+		}
+
+		/* Friendly note:
+		 * Convert the PCM into wav using: avconv -y -f s32le -ar 48k -ac 2 -i pairX.bin fileX.wav.
+		 */
+		char name[32];
+		sprintf(name, "pair%d.bin", i);
+		ofh[i] = fopen(name, "wb");
+	}
+
+	struct fwr_header_audio_s *f;
+
+	while (1) {
+		struct fwr_header_timing_s timing;
+		if (fwr_timing_frame_read(session, &timing) < 0) {
+			break;
+		}
+		if (fwr_pcm_frame_read(session, &f) < 0) {
+			break;
+		}
+
+		frame++;
+
+		uint32_t stride = f->channelCount * (f->sampleDepth / 8);
+
+		printf("id: %8d ch: %d  sfc: %d  depth: %d  stride: %d  bytes: %d\n",
+			frame - 1, f->channelCount, f->frameCount, f->sampleDepth, stride, f->bufferLengthBytes);
+		for (int i = 0; i < f->frameCount; i++) {
+			printf("   frame: %8d  ", i);
+			for (int j = 0; j < stride; j++) {
+
+				if (j && (f->sampleDepth == 32) && ((j % 8) == 0))
+					printf(": ");
+
+				printf("%02x ", *(f->ptr + (i * stride) + j));
+			}
+			printf("\n");
+		}
+
+		if (g_enable_smpte337_detector) {
+			for (int i = 0; i < 8; i++) {
+				int offset = (i * 2) * (f->sampleDepth / 8);
+				size_t l = smpte337_detector_write(det[i], f->ptr + offset,
+					f->frameCount, f->sampleDepth, f->channelCount, stride, 1);
+			}
+		}
+
+		/* Dump each L/R pair to a seperate file. */
+		unsigned char *p = f->ptr;
+		for (int i = 0; i < f->frameCount; i++) {
+			for (int j = 0; j < 8; j++) {
+				fwrite(p, 8, 1, ofh[j]);
+				p += 8;
+			}
+		}
+
+		fwr_pcm_frame_free(session, f);
+	}
+	for (int i = 0; i < 8; i++) {
+		if (g_enable_smpte337_detector)
+			smpte337_detector_free(det[i]);
+		fclose(ofh[i]);
+	}
+
+	fwr_session_file_close(session);
+
+	return 0;
+}
+
 static void convert_colorspace_and_parse_vanc(unsigned char *buf, unsigned int uiWidth, unsigned int lineNr)
 {
 	/* Convert the vanc line from V210 to CrCB422, then vanc parse it */
@@ -527,8 +709,6 @@ static void convert_colorspace_and_parse_vanc(unsigned char *buf, unsigned int u
 	}
 }
 
-#define VANC_SOL_INDICATOR 0xEFBEADDE
-#define VANC_EOL_INDICATOR 0xEDFEADDE
 #define TS_OUTPUT_NAME "/tmp/smpte2038-sample.ts"
 static int AnalyzeVANC(const char *fn)
 {
@@ -651,6 +831,13 @@ static void ProcessVANC(IDeckLinkVideoInputFrame * frame)
 		 * and prepare to receive callbacks.
 		 */
 		convert_colorspace_and_parse_vanc(buf, uiWidth, uiLine);
+
+		if (muxedSession && buf) {
+			struct fwr_header_vanc_s *frame = 0;
+			if (fwr_vanc_frame_create(muxedSession, uiLine, uiWidth, uiHeight, uiStride, (uint8_t *)buf, &frame) == 0) {
+				fwr_writer_enqueue(muxedSession, frame, FWR_FRAME_VANC);
+			}
+		}
 
 		if (vancOutputFile >= 0) {
 			/* Warning: Balance these writes with the file reads in AnalyzeVANC */
@@ -836,6 +1023,17 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 		monitorSignal(videoFrame, audioFrame);
 		return S_OK;
 	}
+	if (writeSession) {
+		struct fwr_header_timing_s *timing;
+		fwr_timing_frame_create(writeSession, (uint32_t)selectedDisplayMode, &timing);
+		fwr_timing_frame_write(writeSession, timing);
+		fwr_timing_frame_free(writeSession, timing);
+	}
+	if (muxedSession) {
+		struct fwr_header_timing_s *timing;
+		fwr_timing_frame_create(muxedSession, (uint32_t)selectedDisplayMode, &timing);
+		fwr_writer_enqueue(muxedSession, timing, FWR_FRAME_TIMING);
+	}
 
 	IDeckLinkVideoFrame *rightEyeFrame = NULL;
 	IDeckLinkVideoFrame3DExtensions *threeDExtensions = NULL;
@@ -847,6 +1045,20 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 		showMemory(stderr);
 		g_showStartupMemory = 0;
 	}
+
+	if (muxedSession && videoFrame) {
+		struct fwr_header_video_s *frame;
+		videoFrame->GetBytes(&frameBytes);
+
+		if (fwr_video_frame_create(muxedSession,
+			videoFrame->GetWidth(), videoFrame->GetHeight(), videoFrame->GetRowBytes(),
+			(uint8_t *)frameBytes, &frame) == 0)
+		{
+			fwr_writer_enqueue(muxedSession, frame, FWR_FRAME_VIDEO);
+		}
+
+	}
+
 	// Handle Video Frame
 	if (videoFrame) {
 		frameTime = &frameTimes[0];
@@ -1021,9 +1233,21 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 				interval);
 		}
 
-		if (audioOutputFile != -1) {
+		if (writeSession) {
 			audioFrame->GetBytes(&audioFrameBytes);
-			write(audioOutputFile, audioFrameBytes, sampleSize);
+			struct fwr_header_audio_s *frame = 0;
+			if (fwr_pcm_frame_create(writeSession, audioFrame->GetSampleFrameCount(), g_audioSampleDepth, g_audioChannels, (const uint8_t *)audioFrameBytes, &frame) == 0) {
+				fwr_pcm_frame_write(writeSession, frame);
+				fwr_pcm_frame_free(writeSession, frame);
+			}
+		}
+
+		if (muxedSession) {
+			audioFrame->GetBytes(&audioFrameBytes);
+			struct fwr_header_audio_s *frame = 0;
+			if (fwr_pcm_frame_create(muxedSession, audioFrame->GetSampleFrameCount(), g_audioSampleDepth, g_audioChannels, (const uint8_t *)audioFrameBytes, &frame) == 0) {
+				fwr_writer_enqueue(muxedSession, frame, FWR_FRAME_AUDIO);
+			}
 		}
 
 		frameTime->frameCount++;
@@ -1212,8 +1436,7 @@ static int cb_all(void *callback_context, struct klvanc_context_s *ctx, struct k
 	return 0;
 }
 
-static int cb_VANC_TYPE_KL_UINT64_COUNTER(void *callback_context, struct klvanc_context_s *ctx,
-					  struct klvanc_packet_kl_u64le_counter_s *pkt)
+static int cb_VANC_TYPE_KL_UINT64_COUNTER(void *callback_context, struct klvanc_context_s *ctx, struct klvanc_packet_kl_u64le_counter_s *pkt)
 {
 	/* Have the library display some debug */
 	if (!g_monitor_mode && g_verbose)
@@ -1236,7 +1459,7 @@ static int cb_VANC_TYPE_KL_UINT64_COUNTER(void *callback_context, struct klvanc_
 
 static struct klvanc_callbacks_s callbacks =
 {
-	.afd			= cb_AFD,
+	.afd                    = cb_AFD,
 	.eia_708b               = cb_EIA_708B,
 	.eia_608                = cb_EIA_608,
 	.scte_104               = cb_SCTE_104,
@@ -1283,25 +1506,23 @@ static int usage(const char *progname, int status)
 
 	fprintf(stderr,
 		"    -p <pixelformat>\n"
-		"         0:   8 bit YUV (4:2:2) (default)\n"
-		"         1:  10 bit YUV (4:2:2)\n"
+		"         0:   8 bit YUV (4:2:2)\n"
+		"         1:  10 bit YUV (4:2:2) (default)\n"
 		"         2:  10 bit RGB (4:4:4)\n"
 		"    -t <format> Print timecode\n"
 		"        rp188:  RP 188\n"
 		"         vitc:  VITC\n"
 		"       serial:  Serial Timecode\n"
-		"    -f <filename>   raw video output filename\n"
-		"    -a <filename>   raw audio output filanem\n"
+		"    -f <filename>   raw video output filename (DEPRECATED - Use -x instead)\n"
+		"    -a <filename>   raw audio output filaname\n"
+		"    -A <filename>   Attempt to detect SMPTE337 on the audio file payload, extract payload into pair files,\n"
+		"                    inspect audio buffers at a byte level. Input should be a file created with -a.\n"
 		"    -V <filename>   raw vanc output filename\n"
 		"    -I <filename>   Interpret and display input VANC filename (See -V)\n"
 		"    -l <linenr>     During -I parse, process a specific line# (def: 0 all)\n"
 		"    -L              List available display modes\n"
-		"    -Q              Monitor frame arrival times and various signal conditions\n"
-		"                    (Don't combine this with any recording on VANC monitoring)\n"
-		"                    Trigger console stats output via kill -s SIGUSR1 `pidof klvanc_capture`\n"
-		"                    Reset  console stats via kill -s SIGUSR2 `pidof klvanc_capture`\n"
-		"    -c <channels>   Audio Channels (2, 8 or 16 - def: 2)\n"
-		"    -s <depth>      Audio Sample Depth (16 or 32 - def: 16)\n"
+		"    -c <channels>   Audio Channels (2, 8 or 16 - def: %d)\n"
+		"    -s <depth>      Audio Sample Depth (16 or 32 - def: %d)\n"
 		"    -n <frames>     Number of frames to capture (def: unlimited)\n"
 		"    -v              Increase level of verbosity (def: 0)\n"
 		"    -3              Capture Stereoscopic 3D (Requires 3D Hardware support)\n"
@@ -1314,6 +1535,8 @@ static int usage(const char *progname, int status)
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 		"    -S              Validate PRBS15 sequences are correct on all audio channels (def: disabled).\n"
 #endif
+		"    -x <filename>   Create a muxed audio+video+vanc output file.\n"
+		"    -X <filename>   Analyze a muxed audio+video+vanc input file.\n"
 		"\n"
 		"Capture and display all VANC messages and show line/msg counts in an interactive UI (1080i 59.94):\n"
 		"    %s -m9 -p1 -M\n\n"
@@ -1324,6 +1547,8 @@ static int usage(const char *progname, int status)
 		"Capture then interpret 10bit VANC (or 8bit VANC wth -p0), from 1280x720p60\n"
 		"    %s -m13 -p1 -V vanc.raw\n"
 		"    %s          -I vanc.raw\n\n",
+		g_audioChannels,
+		g_audioSampleDepth,
 		TS_OUTPUT_NAME,
 		basename((char *)progname),
 		basename((char *)progname),
@@ -1340,8 +1565,7 @@ static int _main(int argc, char *argv[])
 	DeckLinkCaptureDelegate *delegate;
 	IDeckLinkDisplayMode *displayMode;
 	BMDVideoInputFlags inputFlags = bmdVideoInputEnableFormatDetection;
-	BMDDisplayMode selectedDisplayMode = bmdModeNTSC;
-	BMDPixelFormat pixelFormat = bmdFormat8BitYUV;
+	BMDPixelFormat pixelFormat = bmdFormat10BitYUV;
 	int displayModeCount = 0;
 	int exitStatus = 1;
 	int ch;
@@ -1360,7 +1584,7 @@ static int _main(int argc, char *argv[])
 	ltn_histogram_alloc_video_defaults(&hist_audio_sfc, "audio sfc");
 	ltn_histogram_alloc_video_defaults(&hist_format_change, "video format change");
 
-	while ((ch = getopt(argc, argv, "?h3c:s:f:a:m:n:p:t:vV:I:i:l:LP:QMS")) != -1) {
+	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MSx:X:")) != -1) {
 		switch (ch) {
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 		case 'S':
@@ -1368,11 +1592,14 @@ static int _main(int argc, char *argv[])
 			g_prbs_initialized = 0;
 			break;
 #endif
-		case 'Q':
-			g_monitorSignalStability = 1;
-			break;
 		case 'm':
 			g_videoModeIndex = atoi(optarg);
+			break;
+		case 'x':
+			g_muxedOutputFilename = optarg;
+			break;
+		case 'X':
+			g_muxedInputFilename = optarg;
 			break;
 		case 'c':
 			g_audioChannels = atoi(optarg);
@@ -1393,6 +1620,10 @@ static int _main(int argc, char *argv[])
 			break;
 		case 'a':
 			g_audioOutputFilename = optarg;
+			break;
+		case 'A':
+			g_enable_smpte337_detector = 1;
+			g_audioInputFilename = optarg;
 			break;
 		case 'I':
 			g_vancInputFilename = optarg;
@@ -1495,6 +1726,12 @@ static int _main(int argc, char *argv[])
 		return AnalyzeVANC(g_vancInputFilename);
 	}
 
+	if (g_audioInputFilename != NULL) {
+		return AnalyzeAudio(g_audioInputFilename);
+	}
+	if (g_muxedInputFilename != NULL) {
+		return AnalyzeMuxed(g_muxedInputFilename);
+	}
 
 	if (!deckLinkIterator) {
 		fprintf(stderr, "This application requires the DeckLink drivers installed.\n");
@@ -1542,9 +1779,15 @@ static int _main(int argc, char *argv[])
 			goto bail;
 		}
 	}
+	if (g_muxedOutputFilename != NULL) {
+		if (fwr_session_file_open(g_muxedOutputFilename, 1, &muxedSession) < 0) {
+			fprintf(stderr, "Could not open muxed output file \"%s\"\n", g_muxedOutputFilename);
+			goto bail;
+		}
+	}
+
 	if (g_audioOutputFilename != NULL) {
-		audioOutputFile = open(g_audioOutputFilename, O_WRONLY | O_CREAT | O_TRUNC, 0664);
-		if (audioOutputFile < 0) {
+		if (fwr_session_file_open(g_audioOutputFilename, 1, &writeSession) < 0) {
 			fprintf(stderr, "Could not open audio output file \"%s\"\n", g_audioOutputFilename);
 			goto bail;
 		}
@@ -1619,8 +1862,8 @@ static int _main(int argc, char *argv[])
 #if HAVE_CURSES_H
 	if (g_monitor_mode) {
 		initscr();
-		pthread_create(&threadId, 0, thread_func_draw, NULL);
-		pthread_create(&threadId, 0, thread_func_input, NULL);
+		pthread_create(&g_monitor_draw_threadId, 0, thread_func_draw, NULL);
+		pthread_create(&g_monitor_input_threadId, 0, thread_func_input, NULL);
 	}
 #endif
 
@@ -1658,6 +1901,10 @@ bail:
 		close(videoOutputFile);
 	if (audioOutputFile)
 		close(audioOutputFile);
+	if (writeSession)
+		fwr_session_file_close(writeSession);
+	if (muxedSession)
+		fwr_session_file_close(muxedSession);
 	if (vancOutputFile)
 		close(vancOutputFile);
 

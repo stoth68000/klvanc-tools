@@ -23,6 +23,9 @@ SRC  = klvanc_util.c
 SRC += $(BLACKMAGIC_SDK_PATH)//DeckLinkAPIDispatch.cpp
 SRC += capture.cpp
 SRC += ts_packetizer.c
+SRC += klringbuffer.c
+SRC += frame-writer.c
+SRC += smpte337_detector.c
 
 #bin_PROGRAMS  = klvanc_util
 bin_PROGRAMS  = klvanc_capture
