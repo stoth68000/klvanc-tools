@@ -112,7 +112,6 @@ static IDeckLinkInput *deckLinkInput;
 static IDeckLinkDisplayModeIterator *displayModeIterator;
 
 static BMDTimecodeFormat g_timecodeFormat = 0;
-static int g_videoModeIndex = -1;
 static uint32_t g_audioChannels = 16;
 static uint32_t g_audioSampleDepth = 32;
 static const char *g_videoOutputFilename = NULL;
@@ -573,7 +572,7 @@ static int AnalyzeMuxed(const char *fn)
 				break;
 			}
 			printf("\t\tvanc: line: %4d -- ", fd->line);
-			for (int i = 0; i < 16; i++)
+			for (int i = 0; i < 32; i++)
 				printf("%02x ", *(fd->ptr + i));
 			printf("\n");
 		} else
@@ -1481,13 +1480,16 @@ static void listDisplayModes()
 			BMDTimeValue frameRateDuration, frameRateScale;
 			displayMode->GetFrameRate(&frameRateDuration, &frameRateScale);
 
-			fprintf(stderr, "        %2d:  %-20s \t %li x %li \t %g FPS [0x%08x]\n",
-				displayModeCount, displayModeString,
+			fprintf(stderr, "        %c%c%c%c : %-20s \t %li x %li \t %7g FPS\n",
+				displayMode->GetDisplayMode() >> 24,
+				displayMode->GetDisplayMode() >> 16,
+				displayMode->GetDisplayMode() >>  8,
+				displayMode->GetDisplayMode(),
+				displayModeString,
 				displayMode->GetWidth(),
 				displayMode->GetHeight(),
 				(double)frameRateScale /
-				(double)frameRateDuration,
-				displayMode->GetDisplayMode());
+				(double)frameRateDuration);
 
 			free(displayModeString);
 			displayModeCount++;
@@ -1502,7 +1504,7 @@ static int usage(const char *progname, int status)
 	fprintf(stderr, COPYRIGHT "\n");
 	fprintf(stderr, "Capture decklink SDI payload, capture vanc, analyze vanc.\n");
 	fprintf(stderr, "Usage: %s -m <mode id> [OPTIONS]\n"
-		"\n" "    -m <mode id>:\n", basename((char *)progname));
+		"\n" "    -m <mode> Eg. Hp60 (default: ntsc):\n", basename((char *)progname));
 
 	fprintf(stderr,
 		"    -p <pixelformat>\n"
@@ -1539,13 +1541,13 @@ static int usage(const char *progname, int status)
 		"    -X <filename>   Analyze a muxed audio+video+vanc input file.\n"
 		"\n"
 		"Capture and display all VANC messages and show line/msg counts in an interactive UI (1080i 59.94):\n"
-		"    %s -m9 -p1 -M\n\n"
+		"    %s -mHi59 -p1 -M\n\n"
 		"Capture raw video and audio to file then playback. 1920x1080p30, 50 complete frames, PCM audio, 8bit mode:\n"
-		"    %s -m13 -n 50 -f video.raw -a audio.raw -p0\n"
+		"    %s -mHp30 -n 50 -f video.raw -a audio.raw -p0\n"
 		"    mplayer video.raw -demuxer rawvideo -rawvideo fps=30:w=1920:h=1080:format=uyvy \\\n"
 		"        -audiofile audio.raw -audio-demuxer 20 -rawaudio rate=48000\n\n"
 		"Capture then interpret 10bit VANC (or 8bit VANC wth -p0), from 1280x720p60\n"
-		"    %s -m13 -p1 -V vanc.raw\n"
+		"    %s -mhp60 -p1 -V vanc.raw\n"
 		"    %s          -I vanc.raw\n\n",
 		g_audioChannels,
 		g_audioSampleDepth,
@@ -1566,11 +1568,11 @@ static int _main(int argc, char *argv[])
 	IDeckLinkDisplayMode *displayMode;
 	BMDVideoInputFlags inputFlags = bmdVideoInputEnableFormatDetection;
 	BMDPixelFormat pixelFormat = bmdFormat10BitYUV;
+
 	int displayModeCount = 0;
 	int exitStatus = 1;
 	int ch;
 	int portnr = 0;
-	bool foundDisplayMode = false;
 	bool wantHelp = false;
 	bool wantDisplayModes = false;
 	HRESULT result;
@@ -1593,7 +1595,12 @@ static int _main(int argc, char *argv[])
 			break;
 #endif
 		case 'm':
-			g_videoModeIndex = atoi(optarg);
+			selectedDisplayMode  = *(optarg + 0) << 24;
+			selectedDisplayMode |= *(optarg + 1) << 16;
+			selectedDisplayMode |= *(optarg + 2) <<  8;
+			selectedDisplayMode |= *(optarg + 3);
+			g_requested_mode_id = selectedDisplayMode;
+			g_detected_mode_id = selectedDisplayMode;
 			break;
 		case 'x':
 			g_muxedOutputFilename = optarg;
@@ -1767,11 +1774,6 @@ static int _main(int argc, char *argv[])
 		goto bail;
 	}
 
-	if (g_videoModeIndex < 0) {
-		fprintf(stderr, "No video mode specified\n");
-		usage(argv[0], 0);
-	}
-
 	if (g_videoOutputFilename != NULL) {
 		videoOutputFile = open(g_videoOutputFilename, O_WRONLY | O_CREAT | O_TRUNC, 0664);
 		if (videoOutputFile < 0) {
@@ -1801,39 +1803,11 @@ static int _main(int argc, char *argv[])
 		}
 	}
 
-	while (displayModeIterator->Next(&displayMode) == S_OK) {
-		if (g_videoModeIndex == displayModeCount) {
-
-			foundDisplayMode = true;
-
-			const char *displayModeName;
-			displayMode->GetName(&displayModeName);
-			selectedDisplayMode = displayMode->GetDisplayMode();
-			g_detected_mode_id = displayMode->GetDisplayMode();
-			g_requested_mode_id = displayMode->GetDisplayMode();
-
-			BMDDisplayModeSupport result;
-			deckLinkInput->DoesSupportVideoMode(selectedDisplayMode, pixelFormat, bmdVideoInputFlagDefault, &result, NULL);
-			if (result == bmdDisplayModeNotSupported) {
-				fprintf(stderr, "The display mode %s is not supported with the selected pixel format\n", displayModeName);
-				goto bail;
-			}
-
-			if (inputFlags & bmdVideoInputDualStream3D) {
-				if (!(displayMode->GetFlags() & bmdDisplayModeSupports3D)) {
-					fprintf(stderr, "The display mode %s is not supported with 3D\n", displayModeName);
-					goto bail;
-				}
-			}
-
-			break;
-		}
-		displayModeCount++;
-		displayMode->Release();
-	}
-
-	if (!foundDisplayMode) {
-		fprintf(stderr, "Invalid mode %d specified\n", g_videoModeIndex);
+	/* Confirm the users requested display mode and other settings are valid for this device. */
+	BMDDisplayModeSupport dm;
+	deckLinkInput->DoesSupportVideoMode(selectedDisplayMode, pixelFormat, bmdVideoInputFlagDefault, &dm, NULL);
+	if (dm == bmdDisplayModeNotSupported) {
+		fprintf(stderr, "The requested display mode is not supported with the selected pixel format\n");
 		goto bail;
 	}
 
