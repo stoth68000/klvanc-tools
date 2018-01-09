@@ -702,6 +702,10 @@ static void convert_colorspace_and_parse_vanc(unsigned char *buf, unsigned int u
 	if (klvanc_v210_line_to_nv20_c(src, p_anc, sizeof(decoded_words), (uiWidth / 6) * 6) < 0)
 		return;
 
+	/* Don't attempt to parse vanc if we're capturing it and the monitor isn't running. */
+	if (!g_monitor_mode && vancOutputFile >= 0)
+		return;
+
 	int ret = klvanc_packet_parse(vanchdl, lineNr, decoded_words, sizeof(decoded_words) / (sizeof(unsigned short)));
 	if (ret < 0) {
 		/* No VANC on this line */
