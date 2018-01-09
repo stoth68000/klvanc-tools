@@ -1085,7 +1085,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 		if (threeDExtensions)
 			threeDExtensions->Release();
 
-		if (videoFrame->GetFlags() & bmdFrameHasNoInputSource && !g_monitor_mode) {
+		if (videoFrame->GetFlags() & bmdFrameHasNoInputSource) {
 			g_no_signal = 1;
 			if (!g_monitor_mode) {
 				time_t now;
