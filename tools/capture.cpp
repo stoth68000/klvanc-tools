@@ -1088,8 +1088,10 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 		if (videoFrame->GetFlags() & bmdFrameHasNoInputSource && !g_monitor_mode) {
 			g_no_signal = 1;
 			if (!g_monitor_mode) {
-				fprintf(stdout, "Frame received (#%8llu) - No input signal detected (%7.2f ms)\n",
-					frameTime->frameCount, interval);
+				time_t now;
+				time(&now);
+				fprintf(stdout, "Frame received (#%8llu) - No input signal detected (%7.2f ms) @ %s",
+					frameTime->frameCount, interval, ctime(&now));
 			}
 		} else {
 			g_no_signal = 0;
