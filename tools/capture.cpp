@@ -1383,7 +1383,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFormatChanged(BMDVideoInputFormatChan
 static int cb_AFD(void *callback_context, struct klvanc_context_s *ctx, struct klvanc_packet_afd_s *pkt)
 {
 	/* Have the library display some debug */
-	if (!g_monitor_mode)
+	if (!g_monitor_mode && g_verbose)
 		klvanc_dump_AFD(ctx, pkt);
 
 	return 0;
@@ -1392,7 +1392,7 @@ static int cb_AFD(void *callback_context, struct klvanc_context_s *ctx, struct k
 static int cb_EIA_708B(void *callback_context, struct klvanc_context_s *ctx, struct klvanc_packet_eia_708b_s *pkt)
 {
 	/* Have the library display some debug */
-	if (!g_monitor_mode)
+	if (!g_monitor_mode && g_verbose)
 		klvanc_dump_EIA_708B(ctx, pkt);
 
 	return 0;
@@ -1401,7 +1401,7 @@ static int cb_EIA_708B(void *callback_context, struct klvanc_context_s *ctx, str
 static int cb_EIA_608(void *callback_context, struct klvanc_context_s *ctx, struct klvanc_packet_eia_608_s *pkt)
 {
 	/* Have the library display some debug */
-	if (!g_monitor_mode)
+	if (!g_monitor_mode && g_verbose)
 		klvanc_dump_EIA_608(ctx, pkt);
 
 	return 0;
@@ -1412,7 +1412,7 @@ static int cb_SCTE_104(void *callback_context, struct klvanc_context_s *ctx, str
 	int ret;
 
 	/* Have the library display some debug */
-	if (!g_monitor_mode) {
+	if (!g_monitor_mode && g_verbose) {
 		ret = klvanc_dump_SCTE_104(ctx, pkt);
 		if (ret != 0)
 			fprintf(stderr, "Error dumping SCTE 104 packet!\n");
@@ -1548,9 +1548,10 @@ static int usage(const char *progname, int status)
 		"    %s -mHp30 -n 50 -f video.raw -a audio.raw -p0\n"
 		"    mplayer video.raw -demuxer rawvideo -rawvideo fps=30:w=1920:h=1080:format=uyvy \\\n"
 		"        -audiofile audio.raw -audio-demuxer 20 -rawaudio rate=48000\n\n"
-		"Capture then interpret 10bit VANC (or 8bit VANC wth -p0), from 1280x720p60\n"
+		"Capture 10bit VANC (or 8bit VANC with -p0), from 1280x720p60\n"
 		"    %s -mhp60 -p1 -V vanc.raw\n"
-		"    %s          -I vanc.raw\n\n",
+		"Parse/Interpret a 10bit VANC (or 8bit VANC with -p0) file\n"
+		"    %s -I vanc.raw\n\n",
 		g_audioChannels,
 		g_audioSampleDepth,
 		TS_OUTPUT_NAME,
