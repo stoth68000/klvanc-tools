@@ -1,5 +1,6 @@
 
 AUTOMAKE_OPTIONS = foreign
+GIT_VERSION := $(shell git describe --abbrev=8 --dirty --always --tags)
 
 BLACKMAGIC_SDK_PATH = $(top_srcdir)/include/decklink-sdk
 
@@ -7,6 +8,7 @@ AM_CPPFLAGS = -DVERSION=\"$(VERSION)\" -DPROG="\"$(PACKAGE)\"" -D_FILE_OFFSET_BI
 	-D_BSD_SOURCE \
 	-I$(BLACKMAGIC_SDK_PATH) \
 	-I$(top_srcdir)/src \
+	-DGIT_VERSION=\"$(GIT_VERSION)\" \
 	-DKL_USERSPACE -D__STDC_FORMAT_MACROS
 
 AM_CFLAGS = -Wall -O3

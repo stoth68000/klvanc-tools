@@ -1509,13 +1509,12 @@ static int usage(const char *progname, int status)
 {
 	fprintf(stderr, COPYRIGHT "\n");
 	fprintf(stderr, "Capture decklink SDI payload, capture vanc, analyze vanc.\n");
-	fprintf(stderr, "Usage: %s -m <mode id> [OPTIONS]\n"
-		"\n" "    -m <mode> Eg. Hp60 (default: ntsc):\n", basename((char *)progname));
-
+	fprintf(stderr, "Version: " GIT_VERSION "\n");
+	fprintf(stderr, "Usage: %s -m <mode id> [OPTIONS]\n", basename((char *)progname));
 	fprintf(stderr,
 		"    -p <pixelformat>\n"
 		"         0:   8 bit YUV (4:2:2)\n"
-		"         1:  10 bit YUV (4:2:2) (default)\n"
+		"         1:  10 bit YUV (4:2:2) (def)\n"
 		"         2:  10 bit RGB (4:4:4)\n"
 		"    -t <format> Print timecode\n"
 		"        rp188:  RP 188\n"
@@ -1529,6 +1528,7 @@ static int usage(const char *progname, int status)
 		"    -I <filename>   Interpret and display input VANC filename (See -V)\n"
 		"    -l <linenr>     During -I parse, process a specific line# (def: 0 all)\n"
 		"    -L              List available display modes\n"
+		"    -m <mode>       Eg. Hp60 (def: ntsc):\n"
 		"    -c <channels>   Audio Channels (2, 8 or 16 - def: %d)\n"
 		"    -s <depth>      Audio Sample Depth (16 or 32 - def: %d)\n"
 		"    -n <frames>     Number of frames to capture (def: unlimited)\n"
@@ -1546,24 +1546,44 @@ static int usage(const char *progname, int status)
 		"    -x <filename>   Create a muxed audio+video+vanc output file.\n"
 		"    -X <filename>   Analyze a muxed audio+video+vanc input file.\n"
 		"\n"
-		"Capture and display all VANC messages and show line/msg counts in an interactive UI (1080i 59.94):\n"
-		"    %s -mHi59 -p1 -M\n\n"
 		"Capture raw video and audio to file then playback. 1920x1080p30, 50 complete frames, PCM audio, 8bit mode:\n"
 		"    %s -mHp30 -n 50 -f video.raw -a audio.raw -p0\n"
 		"    mplayer video.raw -demuxer rawvideo -rawvideo fps=30:w=1920:h=1080:format=uyvy \\\n"
-		"        -audiofile audio.raw -audio-demuxer 20 -rawaudio rate=48000\n\n"
-		"Capture 10bit VANC (or 8bit VANC with -p0), from 1280x720p60\n"
-		"    %s -mhp60 -p1 -V vanc.raw\n"
-		"Parse/Interpret a 10bit VANC (or 8bit VANC with -p0) file\n"
-		"    %s -I vanc.raw\n\n",
+		"        -audiofile audio.raw -audio-demuxer 20 -rawaudio rate=48000\n\n",
 		g_audioChannels,
 		g_audioSampleDepth,
 		TS_OUTPUT_NAME,
-		basename((char *)progname),
-		basename((char *)progname),
-		basename((char *)progname),
 		basename((char *)progname)
 		);
+
+	fprintf(stderr, "Use cases:\n"
+		"1) Capture audio only to disk, view the data in hex format, convert the data into 2-channel pairs, convert a pair into .wav for playback:\n"
+		"\t1a) Capture only raw audio data from 1280x720p60.\n"
+		"\t\t-a audio.raw -mhp60\n"
+		"\t1b) Visually inspect the captured audio file, and deinterleave/extract audio into new 'pair[0-7].raw' files.\n"
+		"\t\t-A audio.raw\n"
+		"\t1c) Convert a 'pair[0-7].raw' file into a playable wav file.\n"
+		"\t\tffmpeg -y -f s32le -ar 48k -ac 2 -i <pair.raw file> output.wav\n"
+		"2) Display all VANC messages onscreen in an interactive UI (1080i 59.94), (10bit incoming video):\n"
+    		"\t-mHi59 -p1 -M\n"
+		"3) Capture VANC data to disk for offline inspection, then inspect it. (1080p60 10bit incoming video):\n"
+		"\t3a) Capture VANC data to disk (1080p60 10bit incoming video):\n"
+    		"\t\t-mHp60 -p1 -V vanc.raw\n"
+		"\t3b) Parse/Interpret the offline VANC file, show any vanc data:\n"
+		"\t\t-I vanc.raw -v\n"
+		"4) Capture 300 frames of video for playback with mplayer, then play it back 1080p30 (8bit support only):\n"
+		"   The resulting file will be huge, so typically you might only want to do this for 5-30 seconds.\n"
+		"\t4a) Capture video:\n"
+		"\t\t-mHp30 -n300 -f video.raw -p0\n"
+		"\t4b) Playback video:\n"
+		"\t\tmplayer video.raw -demuxer rawvideo -rawvideo fps=30:w=1920:h=1080:format=uyvy\n"
+		"5) Capture audio, video and VANC to a single file for offline inspection 1280x720p60 (10bit):\n"
+		"   The resulting file will be huge, so typically you might only want to do this for 5-30 seconds.\n"
+		"\t5a) Capture the signal to disk:\n"
+		"\t\t-mhp60 -p1 -x capture.mx\n"
+		"\t5b) Inspect a previously captured mx file (WORK IN PROGRESS):\n"
+		"\t\t-X capture.mx\n"
+	);
 
 	exit(status);
 }
