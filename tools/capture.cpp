@@ -629,6 +629,7 @@ static int AnalyzeMuxed(const char *fn)
 	}
 
 	fwr_session_file_close(session);
+	return 0;
 }
 
 static int AnalyzeAudio(const char *fn)
