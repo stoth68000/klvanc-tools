@@ -731,8 +731,16 @@ static void convert_colorspace_and_parse_vanc(unsigned char *buf, unsigned int u
 	uint16_t decoded_words[16384];
 	memset(&decoded_words[0], 0, sizeof(decoded_words));
 	uint16_t *p_anc = decoded_words;
-	if (klvanc_v210_line_to_nv20_c(src, p_anc, sizeof(decoded_words), (uiWidth / 6) * 6) < 0)
-		return;
+	if (uiWidth == 1920) {
+		/* Standard definition video will have VANC spanning both
+		   Luma and Chroma channels */
+		klvanc_v210_line_to_uyvy_c(src, p_anc, uiWidth);
+	} else {
+		if (klvanc_v210_line_to_nv20_c(src, p_anc,
+					       sizeof(decoded_words),
+					       (uiWidth / 6) * 6) < 0)
+			return;
+	}
 
 	/* Don't attempt to parse vanc if we're capturing it and the monitor isn't running. */
 	if (!g_monitor_mode && vancOutputFile >= 0)
