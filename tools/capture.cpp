@@ -30,6 +30,37 @@
 #include "ts_packetizer.h"
 #include "histogram.h"
 
+/* Decklink portability macros */
+#ifdef _WIN32
+static char *dup_wchar_to_utf8(wchar_t *w)
+{
+    char *s = NULL;
+    int l = WideCharToMultiByte(CP_UTF8, 0, w, -1, 0, 0, 0, 0);
+    s = (char *) av_malloc(l);
+    if (s)
+        WideCharToMultiByte(CP_UTF8, 0, w, -1, s, l, 0, 0);
+    return s;
+}
+#define DECKLINK_STR    OLECHAR *
+#define DECKLINK_STRDUP dup_wchar_to_utf8
+#define DECKLINK_FREE(s) SysFreeString(s)
+#elif defined(__APPLE__)
+static char *dup_cfstring_to_utf8(CFStringRef w)
+{
+    char s[256];
+    CFStringGetCString(w, s, 255, kCFStringEncodingUTF8);
+    return strdup(s);
+}
+#define DECKLINK_STR    const __CFString *
+#define DECKLINK_STRDUP dup_cfstring_to_utf8
+#define DECKLINK_FREE(s) CFRelease(s)
+#else
+#define DECKLINK_STR    const char *
+#define DECKLINK_STRDUP strdup
+/* free() is needed for a string returned by the DeckLink SDL. */
+#define DECKLINK_FREE(s) free((void *) s)
+#endif
+
 #define WIDE 80
 
 class DeckLinkCaptureDelegate : public IDeckLinkInputCallback
@@ -598,6 +629,7 @@ static int AnalyzeMuxed(const char *fn)
 	}
 
 	fwr_session_file_close(session);
+	return 0;
 }
 
 static int AnalyzeAudio(const char *fn)
@@ -699,8 +731,16 @@ static void convert_colorspace_and_parse_vanc(unsigned char *buf, unsigned int u
 	uint16_t decoded_words[16384];
 	memset(&decoded_words[0], 0, sizeof(decoded_words));
 	uint16_t *p_anc = decoded_words;
-	if (klvanc_v210_line_to_nv20_c(src, p_anc, sizeof(decoded_words), (uiWidth / 6) * 6) < 0)
-		return;
+	if (uiWidth == 1920) {
+		/* Standard definition video will have VANC spanning both
+		   Luma and Chroma channels */
+		klvanc_v210_line_to_uyvy_c(src, p_anc, uiWidth);
+	} else {
+		if (klvanc_v210_line_to_nv20_c(src, p_anc,
+					       sizeof(decoded_words),
+					       (uiWidth / 6) * 6) < 0)
+			return;
+	}
 
 	/* Don't attempt to parse vanc if we're capturing it and the monitor isn't running. */
 	if (!g_monitor_mode && vancOutputFile >= 0)
@@ -1099,13 +1139,16 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 			}
 		} else {
 			g_no_signal = 0;
-			const char *timecodeString = NULL;
+			char *timecodeString = NULL;
+			DECKLINK_STR timecodeStringTmp = NULL;
 			if (g_timecodeFormat != 0) {
 				IDeckLinkTimecode *timecode;
 				if (videoFrame->
 				    GetTimecode(g_timecodeFormat,
 						&timecode) == S_OK) {
-					timecode->GetString(&timecodeString);
+					timecode->GetString(&timecodeStringTmp);
+					timecodeString = DECKLINK_STRDUP(timecodeStringTmp);
+					DECKLINK_FREE(timecodeStringTmp);
 				}
 			}
 
@@ -1179,7 +1222,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 				showMemory(stdout);
 
 			if (timecodeString)
-				free((void *)timecodeString);
+				free(timecodeString);
 
 			if (videoOutputFile != -1) {
 				videoFrame->GetBytes(&frameBytes);
@@ -1480,12 +1523,14 @@ static void listDisplayModes()
 	IDeckLinkDisplayMode *displayMode;
 	while (displayModeIterator->Next(&displayMode) == S_OK) {
 
-		char *displayModeString = NULL;
-		HRESULT result = displayMode->GetName((const char **)&displayModeString);
+		char * displayModeString = NULL;
+		DECKLINK_STR displayModeStringTmp = NULL;
+		HRESULT result = displayMode->GetName(&displayModeStringTmp);
 		if (result == S_OK) {
 			BMDTimeValue frameRateDuration, frameRateScale;
 			displayMode->GetFrameRate(&frameRateDuration, &frameRateScale);
-
+			displayModeString = DECKLINK_STRDUP(displayModeStringTmp);
+			DECKLINK_FREE(displayModeStringTmp);
 			fprintf(stderr, "        %c%c%c%c : %-20s \t %li x %li \t %7g FPS\n",
 				displayMode->GetDisplayMode() >> 24,
 				displayMode->GetDisplayMode() >> 16,
