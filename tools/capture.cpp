@@ -731,7 +731,8 @@ static void convert_colorspace_and_parse_vanc(unsigned char *buf, unsigned int u
 	uint16_t decoded_words[16384];
 	memset(&decoded_words[0], 0, sizeof(decoded_words));
 	uint16_t *p_anc = decoded_words;
-	if (uiWidth == 1920) {
+
+	if (uiWidth == 720) {
 		/* Standard definition video will have VANC spanning both
 		   Luma and Chroma channels */
 		klvanc_v210_line_to_uyvy_c(src, p_anc, uiWidth);
@@ -824,7 +825,7 @@ static int AnalyzeVANC(const char *fn)
 			}
 			klvanc_smpte2038_packetizer_begin(smpte2038_ctx);
 		}
-		convert_colorspace_and_parse_vanc(buf, uiStride, uiLine);
+		convert_colorspace_and_parse_vanc(buf, uiWidth, uiLine);
 	}
 
 	free(buf);
