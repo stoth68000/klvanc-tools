@@ -160,6 +160,8 @@ static int g_monitor_mode = 0;
 static int g_no_signal = 1;
 static BMDDisplayMode g_detected_mode_id = 0;
 static BMDDisplayMode g_requested_mode_id = 0;
+static BMDVideoInputFlags g_inputFlags = bmdVideoInputEnableFormatDetection;
+static BMDPixelFormat g_pixelFormat = bmdFormat10BitYUV;
 
 static int g_enable_smpte337_detector = 0;
 
@@ -288,13 +290,13 @@ static void vanc_monitor_stats_dump_curses()
 	char head_c[160];
 	if (g_no_signal)
 		sprintf(head_c, "NO SIGNAL");
-	else
-	if (g_requested_mode_id == g_detected_mode_id)
-		sprintf(head_c, "SIGNAL LOCKED");
-	else {
-		//sprintf(head_c, "CHECK SIGNAL SETTINGS %x == %x", g_detected_mode_id, g_requested_mode_id);
-		sprintf(head_c, "CHECK SIGNAL SETTINGS");
+	else if (g_requested_mode_id != 0 && g_requested_mode_id != g_detected_mode_id) {
+		sprintf(head_c, "CHECK SIGNAL SETTINGS %c%c%c%c", g_detected_mode_id >> 24,
+			g_detected_mode_id >> 16, g_detected_mode_id >> 8, g_detected_mode_id);
 		headLineColor = 4;
+	} else {
+		sprintf(head_c, "SIGNAL LOCKED %c%c%c%c", g_detected_mode_id >> 24,
+			g_detected_mode_id >> 16, g_detected_mode_id >> 8, g_detected_mode_id);
 	}
 
 	char head_a[160];
@@ -1421,9 +1423,22 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 
 HRESULT DeckLinkCaptureDelegate::VideoInputFormatChanged(BMDVideoInputFormatChangedEvents events, IDeckLinkDisplayMode * mode, BMDDetectedVideoInputFormatFlags)
 {
+	HRESULT result;
 	ltn_histogram_update_with_timevalue(hist_format_change, 1);
 
-	g_detected_mode_id = mode->GetDisplayMode();
+	if (events & bmdVideoInputDisplayModeChanged) {
+		g_detected_mode_id = mode->GetDisplayMode();
+		if (g_requested_mode_id == 0) {
+			deckLinkInput->PauseStreams();
+			result = deckLinkInput->EnableVideoInput(g_detected_mode_id,
+								 g_pixelFormat, g_inputFlags);
+			if (result != S_OK) {
+				fprintf(stderr, "Failed to enable video input. Is another application using the card? (Result=0x%x\n", result);
+			}
+			deckLinkInput->FlushStreams();
+			deckLinkInput->StartStreams();
+		}
+	}
 	return S_OK;
 }
 
@@ -1556,7 +1571,7 @@ static int usage(const char *progname, int status)
 	fprintf(stderr, COPYRIGHT "\n");
 	fprintf(stderr, "Capture decklink SDI payload, capture vanc, analyze vanc.\n");
 	fprintf(stderr, "Version: " GIT_VERSION "\n");
-	fprintf(stderr, "Usage: %s -m <mode id> [OPTIONS]\n", basename((char *)progname));
+	fprintf(stderr, "Usage: %s [OPTIONS]\n", basename((char *)progname));
 	fprintf(stderr,
 		"    -p <pixelformat>\n"
 		"         0:   8 bit YUV (4:2:2)\n"
@@ -1574,8 +1589,11 @@ static int usage(const char *progname, int status)
 		"    -I <filename>   Interpret and display input VANC filename (See -V)\n"
 		"    -l <linenr>     During -I parse, process a specific line# (def: 0 all)\n"
 		"    -L              List available display modes\n"
-		"    -m <mode>       Eg. Hi59 (1080i59), hp60 (1280x720p60) Hp60 (1080p60) (def: ntsc):\n"
+		"    -m <mode>       Force to capture in specified mode\n"
+		"                    Eg. Hi59 (1080i59), hp60 (1280x720p60) Hp60 (1080p60) (def: ntsc):\n"
 		"                    See -L for a complete list of which modes are supported by the capture hardware.\n"
+		"                    Device will autodetect format if not specified.  If mode is specified, capture\n"
+		"                    will be locked to that mode and 'no signal' will be reported if not matching.\n"
 		"    -c <channels>   Audio Channels (2, 8 or 16 - def: %d)\n"
 		"    -s <depth>      Audio Sample Depth (16 or 32 - def: %d)\n"
 		"    -n <frames>     Number of frames to capture (def: unlimited)\n"
@@ -1640,8 +1658,6 @@ static int _main(int argc, char *argv[])
 	IDeckLinkIterator *deckLinkIterator = CreateDeckLinkIteratorInstance();
 	DeckLinkCaptureDelegate *delegate;
 	IDeckLinkDisplayMode *displayMode;
-	BMDVideoInputFlags inputFlags = bmdVideoInputEnableFormatDetection;
-	BMDPixelFormat pixelFormat = bmdFormat10BitYUV;
 
 	int displayModeCount = 0;
 	int exitStatus = 1;
@@ -1733,18 +1749,18 @@ static int _main(int argc, char *argv[])
 			g_verbose++;
 			break;
 		case '3':
-			inputFlags |= bmdVideoInputDualStream3D;
+			g_inputFlags |= bmdVideoInputDualStream3D;
 			break;
 		case 'p':
 			switch (atoi(optarg)) {
 			case 0:
-				pixelFormat = bmdFormat8BitYUV;
+				g_pixelFormat = bmdFormat8BitYUV;
 				break;
 			case 1:
-				pixelFormat = bmdFormat10BitYUV;
+				g_pixelFormat = bmdFormat10BitYUV;
 				break;
 			case 2:
-				pixelFormat = bmdFormat10BitRGB;
+				g_pixelFormat = bmdFormat10BitRGB;
 				break;
 			default:
 				fprintf(stderr, "Invalid argument: Pixel format %d is not valid", atoi(optarg));
@@ -1879,13 +1895,13 @@ static int _main(int argc, char *argv[])
 
 	/* Confirm the users requested display mode and other settings are valid for this device. */
 	BMDDisplayModeSupport dm;
-	deckLinkInput->DoesSupportVideoMode(selectedDisplayMode, pixelFormat, bmdVideoInputFlagDefault, &dm, NULL);
+	deckLinkInput->DoesSupportVideoMode(selectedDisplayMode, g_pixelFormat, g_inputFlags, &dm, NULL);
 	if (dm == bmdDisplayModeNotSupported) {
 		fprintf(stderr, "The requested display mode is not supported with the selected pixel format\n");
 		goto bail;
 	}
 
-	result = deckLinkInput->EnableVideoInput(selectedDisplayMode, pixelFormat, inputFlags);
+	result = deckLinkInput->EnableVideoInput(selectedDisplayMode, g_pixelFormat, g_inputFlags);
 	if (result != S_OK) {
 		fprintf(stderr, "Failed to enable video input. Is another application using the card?\n");
 		goto bail;
