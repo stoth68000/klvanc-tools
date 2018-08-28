@@ -26,6 +26,7 @@ SRC += ts_packetizer.c
 SRC += klringbuffer.c
 SRC += frame-writer.c
 SRC += smpte337_detector.c
+SRC += rcwt.c
 
 #bin_PROGRAMS  = klvanc_util
 bin_PROGRAMS  = klvanc_capture
