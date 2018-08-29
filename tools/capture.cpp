@@ -1809,7 +1809,7 @@ static int _main(int argc, char *argv[])
 			fprintf(stderr, "Could not open rcwt output file \"%s\"\n", g_rcwtOutputFilename);
 			goto bail;
 		}
-		if (rcwt_create_header(rcwtOutputFile, 0xcc, 0x0052) < 0) {
+		if (rcwt_write_header(rcwtOutputFile, 0xcc, 0x0052) < 0) {
 			fprintf(stderr, "Could not write rcwt header to output file\n");
 			goto bail;
 		}

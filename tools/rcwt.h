@@ -41,7 +41,7 @@
 extern "C" {
 #endif
 
-int rcwt_create_header(int fd, uint8_t creating_program, uint16_t program_version);
+int rcwt_write_header(int fd, uint8_t creating_program, uint16_t program_version);
 int rcwt_write_captions(int fd, uint16_t cc_count, uint8_t *caption_data, uint64_t caption_time);
 
 #ifdef __cplusplus

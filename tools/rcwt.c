@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <string.h>
 
-int rcwt_create_header(int fd, uint8_t creating_program, uint16_t program_version)
+int rcwt_write_header(int fd, uint8_t creating_program, uint16_t program_version)
 {
 	char header[11];
 	ssize_t ret;
