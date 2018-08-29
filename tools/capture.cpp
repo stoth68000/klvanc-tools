@@ -19,6 +19,7 @@
 #include <libklvanc/smpte2038.h>
 #include "smpte337_detector.h"
 #include "frame-writer.h"
+#include "rcwt.h"
 
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 #include <libklmonitoring/klmonitoring.h>
@@ -126,6 +127,7 @@ static int audioOutputFile = -1;
 static struct fwr_session_s *writeSession = NULL;
 
 static int vancOutputFile = -1;
+static int rcwtOutputFile = -1;
 static int g_showStartupMemory = 0;
 static int g_verbose = 0;
 static unsigned int g_linenr = 0;
@@ -152,6 +154,7 @@ static const char *g_vancOutputFilename = NULL;
 static const char *g_vancInputFilename = NULL;
 static const char *g_muxedOutputFilename = NULL;
 static const char *g_muxedInputFilename = NULL;
+static const char *g_rcwtOutputFilename = NULL;
 static struct fwr_session_s *muxedSession = NULL;
 static int g_maxFrames = -1;
 static int g_shutdown = 0;
@@ -1454,9 +1457,23 @@ static int cb_AFD(void *callback_context, struct klvanc_context_s *ctx, struct k
 
 static int cb_EIA_708B(void *callback_context, struct klvanc_context_s *ctx, struct klvanc_packet_eia_708b_s *pkt)
 {
+	uint8_t caption_data[128];
+
 	/* Have the library display some debug */
 	if (!g_monitor_mode && g_verbose)
 		klvanc_dump_EIA_708B(ctx, pkt);
+
+	if (rcwtOutputFile >= 0) {
+		if (pkt->ccdata.cc_count * 3 > sizeof(caption_data))
+			return -1;
+		for (size_t i = 0; i < pkt->ccdata.cc_count; i++) {
+			caption_data[3*i+0] =  0xf8 | (pkt->ccdata.cc[i].cc_valid ? 0x04 : 0x00) |
+				(pkt->ccdata.cc[i].cc_type & 0x03);
+			caption_data[3*i+1] = pkt->ccdata.cc[i].cc_data[0];
+			caption_data[3*i+2] = pkt->ccdata.cc[i].cc_data[1];
+		}
+		rcwt_write_captions(rcwtOutputFile, pkt->ccdata.cc_count, caption_data, 0);
+	}
 
 	return 0;
 }
@@ -1587,6 +1604,7 @@ static int usage(const char *progname, int status)
 		"                    inspect audio buffers at a byte level. Input should be a file created with -a.\n"
 		"    -V <filename>   raw vanc output filename\n"
 		"    -I <filename>   Interpret and display input VANC filename (See -V)\n"
+		"    -R <filename>   RCWT caption output filename\n"
 		"    -l <linenr>     During -I parse, process a specific line# (def: 0 all)\n"
 		"    -L              List available display modes\n"
 		"    -m <mode>       Force to capture in specified mode\n"
@@ -1676,7 +1694,7 @@ static int _main(int argc, char *argv[])
 	ltn_histogram_alloc_video_defaults(&hist_audio_sfc, "audio sfc");
 	ltn_histogram_alloc_video_defaults(&hist_format_change, "video format change");
 
-	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MSx:X:")) != -1) {
+	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MSx:X:R:")) != -1) {
 		switch (ch) {
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 		case 'S':
@@ -1737,6 +1755,9 @@ static int _main(int argc, char *argv[])
 		case 'V':
 			g_vancOutputFilename = optarg;
 			break;
+		case 'R':
+			g_rcwtOutputFilename = optarg;
+			break;
 		case 'n':
 			g_maxFrames = atoi(optarg);
 			break;
@@ -1796,6 +1817,18 @@ static int _main(int argc, char *argv[])
 	if (wantHelp) {
 		usage(argv[0], 0);
 		goto bail;
+	}
+
+	if (g_rcwtOutputFilename != NULL) {
+		rcwtOutputFile = open(g_rcwtOutputFilename, O_WRONLY | O_CREAT | O_TRUNC, 0664);
+		if (rcwtOutputFile < 0) {
+			fprintf(stderr, "Could not open rcwt output file \"%s\"\n", g_rcwtOutputFilename);
+			goto bail;
+		}
+		if (rcwt_write_header(rcwtOutputFile, 0xcc, 0x0052) < 0) {
+			fprintf(stderr, "Could not write rcwt header to output file\n");
+			goto bail;
+		}
 	}
 
  	if (g_packetizeSMPTE2038) {
@@ -1971,6 +2004,8 @@ bail:
 		fwr_session_file_close(muxedSession);
 	if (vancOutputFile)
 		close(vancOutputFile);
+	if (rcwtOutputFile)
+		close(rcwtOutputFile);
 
 	RELEASE_IF_NOT_NULL(displayModeIterator);
 	RELEASE_IF_NOT_NULL(deckLinkInput);
