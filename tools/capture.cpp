@@ -1844,7 +1844,8 @@ static int _main(int argc, char *argv[])
                 exit(1);
         }
 
-	klvanc_context_enable_cache(vanchdl);
+	if (g_monitor_mode)
+		klvanc_context_enable_cache(vanchdl);
 
 	/* We specifically want to see packets that have bad checksums. */
 	vanchdl->allow_bad_checksums = 1;
