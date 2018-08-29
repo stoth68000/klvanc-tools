@@ -502,8 +502,8 @@ static void signal_handler(int signum)
 		ltn_histogram_reset(hist_audio_sfc);
 		ltn_histogram_reset(hist_format_change);
 	} else {
-		pthread_cond_signal(&sleepCond);
 		g_shutdown = 1;
+		pthread_cond_signal(&sleepCond);
 	}
 }
 
@@ -1969,7 +1969,8 @@ static int _main(int argc, char *argv[])
 
 	/* Block main thread until signal occurs */
 	pthread_mutex_lock(&sleepMutex);
-	pthread_cond_wait(&sleepCond, &sleepMutex);
+	while (g_shutdown == 0)
+		pthread_cond_wait(&sleepCond, &sleepMutex);
 	pthread_mutex_unlock(&sleepMutex);
 
 	while (g_shutdown != 2)
