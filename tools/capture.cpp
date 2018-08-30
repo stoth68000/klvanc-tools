@@ -502,8 +502,8 @@ static void signal_handler(int signum)
 		ltn_histogram_reset(hist_audio_sfc);
 		ltn_histogram_reset(hist_format_change);
 	} else {
-		pthread_cond_signal(&sleepCond);
 		g_shutdown = 1;
+		pthread_cond_signal(&sleepCond);
 	}
 }
 
@@ -680,16 +680,16 @@ static int AnalyzeAudio(const char *fn)
 
 		printf("id: %8d ch: %d  sfc: %d  depth: %d  stride: %d  bytes: %d\n",
 			frame - 1, f->channelCount, f->frameCount, f->sampleDepth, stride, f->bufferLengthBytes);
-		for (int i = 0; i < f->frameCount; i++) {
-			printf("   frame: %8d  ", i);
-			for (int j = 0; j < stride; j++) {
-
-				if (j && (f->sampleDepth == 32) && ((j % 8) == 0))
-					printf(": ");
-
-				printf("%02x ", *(f->ptr + (i * stride) + j));
+		if (g_verbose) {
+			for (int i = 0; i < f->frameCount; i++) {
+				printf("   frame: %8d  ", i);
+				for (int j = 0; j < stride; j++) {
+					if (j && (f->sampleDepth == 32) && ((j % 8) == 0))
+						printf(": ");
+					printf("%02x ", *(f->ptr + (i * stride) + j));
+				}
+				printf("\n");
 			}
-			printf("\n");
 		}
 
 		if (g_enable_smpte337_detector) {
@@ -1844,7 +1844,8 @@ static int _main(int argc, char *argv[])
                 exit(1);
         }
 
-	klvanc_context_enable_cache(vanchdl);
+	if (g_monitor_mode)
+		klvanc_context_enable_cache(vanchdl);
 
 	/* We specifically want to see packets that have bad checksums. */
 	vanchdl->allow_bad_checksums = 1;
@@ -1969,7 +1970,8 @@ static int _main(int argc, char *argv[])
 
 	/* Block main thread until signal occurs */
 	pthread_mutex_lock(&sleepMutex);
-	pthread_cond_wait(&sleepCond, &sleepMutex);
+	while (g_shutdown == 0)
+		pthread_cond_wait(&sleepCond, &sleepMutex);
 	pthread_mutex_unlock(&sleepMutex);
 
 	while (g_shutdown != 2)
