@@ -88,10 +88,16 @@ int fwr_session_file_open(const char *filename, int writeMode, struct fwr_sessio
 	if (!s)
 		return -1;
 
-	if (writeMode)
-		s->fh = fopen(filename, "wb");
-	else
-		s->fh = fopen(filename, "rb");
+	if (writeMode) {
+		/* If file ends in .gz, create compressed file with "Best Performance",
+		   otherwise open in transparent mode where gzwrite() is a passthrough */
+		if (strlen(filename) > 3 && strcmp(&filename[strlen(filename) - 3] , ".gz") == 0)
+			s->fh = gzopen(filename, "wb1");
+		else
+			s->fh = gzopen(filename, "wbT");
+	} else {
+		s->fh = gzopen(filename, "rb");
+	}
 
 	if (!s->fh) {
 		free(s);
@@ -118,7 +124,7 @@ int fwr_pcm_frame_read(struct fwr_session_s *session, struct fwr_header_audio_s 
 	if (!f)
 		return -1;
 
-	if (fread(f, 1, fwr_header_audio_size_pre, session->fh) != fwr_header_audio_size_pre) {
+	if (gzfread(f, 1, fwr_header_audio_size_pre, session->fh) != fwr_header_audio_size_pre) {
 		free(f);
 		return -1;
 	}
@@ -129,13 +135,13 @@ int fwr_pcm_frame_read(struct fwr_session_s *session, struct fwr_header_audio_s 
 		return -1;
 	}
 
-	if (fread(f->ptr, 1, f->bufferLengthBytes, session->fh) != f->bufferLengthBytes) {
+	if (gzfread(f->ptr, 1, f->bufferLengthBytes, session->fh) != f->bufferLengthBytes) {
 		free(f->ptr);
 		free(f);
 		return -1;
 	}
 
-	if (fread(&f->footer, 1, fwr_header_audio_size_post, session->fh) != fwr_header_audio_size_post) {
+	if (gzfread(&f->footer, 1, fwr_header_audio_size_post, session->fh) != fwr_header_audio_size_post) {
 		free(f->ptr);
 		free(f);
 		return -1;
@@ -164,7 +170,7 @@ void fwr_session_file_close(struct fwr_session_s *session)
 	}
 
 	if (session->fh) {
-		fclose(session->fh);
+		gzclose(session->fh);
 		session->fh = NULL;
 	}
 	free(session);
@@ -202,17 +208,17 @@ int  fwr_pcm_frame_create(struct fwr_session_s *session,
 int fwr_pcm_frame_write(struct fwr_session_s *session, struct fwr_header_audio_s *frame)
 {
 	uint32_t frame_type = audio_v1_header;
-	if (fwrite(&frame_type, 1, sizeof(frame_type), session->fh) != sizeof(frame_type)) {
+	if (gzfwrite(&frame_type, 1, sizeof(frame_type), session->fh) != sizeof(frame_type)) {
 		return -1;
 	}
-	if (fwrite(frame, 1, fwr_header_audio_size_pre, session->fh) != fwr_header_audio_size_pre) {
+	if (gzfwrite(frame, 1, fwr_header_audio_size_pre, session->fh) != fwr_header_audio_size_pre) {
 		return -1;
 	}
-	if (fwrite(frame->ptr, 1, frame->bufferLengthBytes, session->fh) != frame->bufferLengthBytes) {
+	if (gzfwrite(frame->ptr, 1, frame->bufferLengthBytes, session->fh) != frame->bufferLengthBytes) {
 		return -1;
 	}
 
-	if (fwrite(&frame->footer, 1, fwr_header_audio_size_post, session->fh) != fwr_header_audio_size_post) {
+	if (gzfwrite(&frame->footer, 1, fwr_header_audio_size_post, session->fh) != fwr_header_audio_size_post) {
 		return -1;
 	}
 
@@ -240,11 +246,11 @@ int fwr_timing_frame_create(struct fwr_session_s *session,
 int fwr_timing_frame_write(struct fwr_session_s *session, struct fwr_header_timing_s *frame)
 {
 	uint32_t frame_type = timing_v1_header;
-	if (fwrite(&frame_type, 1, sizeof(frame_type), session->fh) != sizeof(frame_type)) {
+	if (gzfwrite(&frame_type, 1, sizeof(frame_type), session->fh) != sizeof(frame_type)) {
 		return -1;
 	}
 
-	if (fwrite(frame, 1, sizeof(*frame), session->fh) != sizeof(*frame)) {
+	if (gzfwrite(frame, 1, sizeof(*frame), session->fh) != sizeof(*frame)) {
 		return -1;
 	}
 
@@ -253,7 +259,7 @@ int fwr_timing_frame_write(struct fwr_session_s *session, struct fwr_header_timi
 
 int fwr_timing_frame_read(struct fwr_session_s *session, struct fwr_header_timing_s *frame)
 {
-	if (fread(frame, 1, sizeof(*frame), session->fh) != sizeof(*frame)) {
+	if (gzfread(frame, 1, sizeof(*frame), session->fh) != sizeof(*frame)) {
 		return -1;
 	}
 
@@ -278,7 +284,7 @@ int fwr_video_frame_read(struct fwr_session_s *session, struct fwr_header_video_
 #if LOCAL_DEBUG
 	printf("%s() reading %d bytes of header\n", __func__, fwr_header_video_size_pre);
 #endif
-	if (fread(f, 1, fwr_header_video_size_pre, session->fh) != fwr_header_video_size_pre) {
+	if (gzfread(f, 1, fwr_header_video_size_pre, session->fh) != fwr_header_video_size_pre) {
 		free(f);
 		return -1;
 	}
@@ -292,7 +298,7 @@ int fwr_video_frame_read(struct fwr_session_s *session, struct fwr_header_video_
 #if LOCAL_DEBUG
 	printf("%s() reading %d bytes of data\n", __func__, f->bufferLengthBytes);
 #endif
-	if (fread(f->ptr, 1, f->bufferLengthBytes, session->fh) != f->bufferLengthBytes) {
+	if (gzfread(f->ptr, 1, f->bufferLengthBytes, session->fh) != f->bufferLengthBytes) {
 		free(f->ptr);
 		free(f);
 		return -1;
@@ -301,7 +307,7 @@ int fwr_video_frame_read(struct fwr_session_s *session, struct fwr_header_video_
 #if LOCAL_DEBUG
 	printf("%s() reading %d bytes of footer\n", __func__, fwr_header_video_size_post);
 #endif
-	if (fread(&f->eof, 1, fwr_header_video_size_post, session->fh) != fwr_header_video_size_post) {
+	if (gzfread(&f->eof, 1, fwr_header_video_size_post, session->fh) != fwr_header_video_size_post) {
 		free(f->ptr);
 		free(f);
 		return -1;
@@ -356,18 +362,18 @@ int  fwr_video_frame_create(struct fwr_session_s *session,
 int fwr_video_frame_write(struct fwr_session_s *session, struct fwr_header_video_s *frame)
 {
 	uint32_t frame_type = video_v1_header;;
-	if (fwrite(&frame_type, 1, sizeof(frame_type), session->fh) != sizeof(frame_type)) {
+	if (gzfwrite(&frame_type, 1, sizeof(frame_type), session->fh) != sizeof(frame_type)) {
 		return -1;
 	}
-	if (fwrite(frame, 1, fwr_header_video_size_pre, session->fh) != fwr_header_video_size_pre) {
-		return -1;
-	}
-
-	if (fwrite(frame->ptr, 1, frame->bufferLengthBytes, session->fh) != frame->bufferLengthBytes) {
+	if (gzfwrite(frame, 1, fwr_header_video_size_pre, session->fh) != fwr_header_video_size_pre) {
 		return -1;
 	}
 
-	if (fwrite(&frame->eof, 1, fwr_header_video_size_post, session->fh) != fwr_header_video_size_post) {
+	if (gzfwrite(frame->ptr, 1, frame->bufferLengthBytes, session->fh) != frame->bufferLengthBytes) {
+		return -1;
+	}
+
+	if (gzfwrite(&frame->eof, 1, fwr_header_video_size_post, session->fh) != fwr_header_video_size_post) {
 		return -1;
 	}
 
@@ -384,7 +390,7 @@ int fwr_vanc_frame_read(struct fwr_session_s *session, struct fwr_header_vanc_s 
 #if LOCAL_DEBUG
 	printf("%s() reading %d bytes of header\n", __func__, fwr_header_vanc_size_pre);
 #endif
-	if (fread(f, 1, fwr_header_vanc_size_pre, session->fh) != fwr_header_vanc_size_pre) {
+	if (gzfread(f, 1, fwr_header_vanc_size_pre, session->fh) != fwr_header_vanc_size_pre) {
 		free(f);
 		return -1;
 	}
@@ -401,7 +407,7 @@ int fwr_vanc_frame_read(struct fwr_session_s *session, struct fwr_header_vanc_s 
 #if LOCAL_DEBUG
 	printf("%s() read %d bytes of data\n", __func__, f->bufferLengthBytes);
 #endif
-	if (fread(f->ptr, 1, f->bufferLengthBytes, session->fh) != f->bufferLengthBytes) {
+	if (gzfread(f->ptr, 1, f->bufferLengthBytes, session->fh) != f->bufferLengthBytes) {
 		free(f->ptr);
 		free(f);
 		return -1;
@@ -410,7 +416,7 @@ int fwr_vanc_frame_read(struct fwr_session_s *session, struct fwr_header_vanc_s 
 #if LOCAL_DEBUG
 	printf("%s() reading %d bytes of footer\n", __func__, fwr_header_vanc_size_post);
 #endif
-	if (fread(&f->eol, 1, fwr_header_vanc_size_post, session->fh) != fwr_header_vanc_size_post) {
+	if (gzfread(&f->eol, 1, fwr_header_vanc_size_post, session->fh) != fwr_header_vanc_size_post) {
 		free(f->ptr);
 		free(f);
 		return -1;
@@ -467,18 +473,18 @@ int  fwr_vanc_frame_create(struct fwr_session_s *session,
 int fwr_vanc_frame_write(struct fwr_session_s *session, struct fwr_header_vanc_s *frame)
 {
 	uint32_t frame_type = VANC_SOL_INDICATOR;
-	if (fwrite(&frame_type, 1, sizeof(frame_type), session->fh) != sizeof(frame_type)) {
+	if (gzfwrite(&frame_type, 1, sizeof(frame_type), session->fh) != sizeof(frame_type)) {
 		return -1;
 	}
-	if (fwrite(frame, 1, fwr_header_vanc_size_pre, session->fh) != fwr_header_vanc_size_pre) {
-		return -1;
-	}
-
-	if (fwrite(frame->ptr, 1, frame->bufferLengthBytes, session->fh) != frame->bufferLengthBytes) {
+	if (gzfwrite(frame, 1, fwr_header_vanc_size_pre, session->fh) != fwr_header_vanc_size_pre) {
 		return -1;
 	}
 
-	if (fwrite(&frame->eol, 1, fwr_header_vanc_size_post, session->fh) != fwr_header_vanc_size_post) {
+	if (gzfwrite(frame->ptr, 1, frame->bufferLengthBytes, session->fh) != frame->bufferLengthBytes) {
+		return -1;
+	}
+
+	if (gzfwrite(&frame->eol, 1, fwr_header_vanc_size_post, session->fh) != fwr_header_vanc_size_post) {
 		return -1;
 	}
 
@@ -487,7 +493,7 @@ int fwr_vanc_frame_write(struct fwr_session_s *session, struct fwr_header_vanc_s
 
 int fwr_session_frame_gettype(struct fwr_session_s *session, uint32_t *header)
 {
-	size_t r = fread(header, 1, sizeof(*header), session->fh);
+	size_t r = gzfread(header, 1, sizeof(*header), session->fh);
 	if (r != sizeof(*header))
 		return -1;
 

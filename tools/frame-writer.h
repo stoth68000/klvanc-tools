@@ -39,6 +39,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <pthread.h>
+#include <zlib.h>
 #include "xorg-list.h"
 
 #ifdef __cplusplus
@@ -63,7 +64,7 @@ struct fwr_header_audio_s
 
 struct fwr_session_s
 {
-	FILE *fh;
+	gzFile fh;
 	int type; /* 1 = PCM_AUDIO. */
 
 	uint64_t counter;
