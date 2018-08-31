@@ -153,6 +153,9 @@ static const char *g_audioInputFilename = NULL;
 static const char *g_vancOutputFilename = NULL;
 static const char *g_vancInputFilename = NULL;
 static const char *g_muxedOutputFilename = NULL;
+static int g_muxedOutputExcludeVideo = 0;
+static int g_muxedOutputExcludeAudio = 0;
+static int g_muxedOutputExcludeData = 0;
 static const char *g_muxedInputFilename = NULL;
 static const char *g_rcwtOutputFilename = NULL;
 static struct fwr_session_s *muxedSession = NULL;
@@ -883,7 +886,7 @@ static void ProcessVANC(IDeckLinkVideoInputFrame * frame)
 		 */
 		convert_colorspace_and_parse_vanc(buf, uiWidth, uiLine);
 
-		if (muxedSession && buf) {
+		if (muxedSession && g_muxedOutputExcludeData == 0 && buf) {
 			struct fwr_header_vanc_s *frame = 0;
 			if (fwr_vanc_frame_create(muxedSession, uiLine, uiWidth, uiHeight, uiStride, (uint8_t *)buf, &frame) == 0) {
 				fwr_writer_enqueue(muxedSession, frame, FWR_FRAME_VANC);
@@ -1097,7 +1100,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 		g_showStartupMemory = 0;
 	}
 
-	if (muxedSession && videoFrame) {
+	if (muxedSession && g_muxedOutputExcludeVideo == 0 && videoFrame) {
 		struct fwr_header_video_s *frame;
 		videoFrame->GetBytes(&frameBytes);
 
@@ -1298,7 +1301,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 			}
 		}
 
-		if (muxedSession) {
+		if (muxedSession && g_muxedOutputExcludeAudio == 0) {
 			audioFrame->GetBytes(&audioFrameBytes);
 			struct fwr_header_audio_s *frame = 0;
 			if (fwr_pcm_frame_create(muxedSession, audioFrame->GetSampleFrameCount(), g_audioSampleDepth, g_audioChannels, (const uint8_t *)audioFrameBytes, &frame) == 0) {
@@ -1629,6 +1632,9 @@ static int usage(const char *progname, int status)
 		"    -S              Validate PRBS15 sequences are correct on all audio channels (def: disabled).\n"
 #endif
 		"    -x <filename>   Create a muxed audio+video+vanc output file.\n"
+		"    -ev             Exclude video from muxed output file.\n"
+		"    -ea             Exclude audio from muxed output file.\n"
+		"    -ed             Exclude data (vanc) from muxed output file.\n"
 		"    -X <filename>   Analyze a muxed audio+video+vanc input file.\n"
 		"\n"
 		"Capture raw video and audio to file then playback. 1920x1080p30, 50 complete frames, PCM audio, 8bit mode:\n"
@@ -1697,7 +1703,7 @@ static int _main(int argc, char *argv[])
 	ltn_histogram_alloc_video_defaults(&hist_format_change, "video format change");
 
 	int v;
-	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MSx:X:R:")) != -1) {
+	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MSx:X:R:e:")) != -1) {
 		switch (ch) {
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 		case 'S':
@@ -1718,6 +1724,22 @@ static int _main(int argc, char *argv[])
 			break;
 		case 'X':
 			g_muxedInputFilename = optarg;
+			break;
+		case 'e':
+			switch (optarg[0]) {
+			case 'v':
+				g_muxedOutputExcludeVideo = 1;
+				break;
+			case 'a':
+				g_muxedOutputExcludeAudio = 1;
+				break;
+			case 'd':
+				g_muxedOutputExcludeData = 1;
+				break;
+			default:
+				fprintf(stderr, "Only valid types to exclude are video/audio/data\n");
+				goto bail;
+			}
 			break;
 		case 'c':
 			g_audioChannels = atoi(optarg);
