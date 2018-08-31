@@ -123,10 +123,6 @@ int fwr_pcm_frame_read(struct fwr_session_s *session, struct fwr_header_audio_s 
 		return -1;
 	}
 
-	if (f->header != audio_v1_header) {
-		return -1;
-	}
-
 	f->ptr = malloc(f->bufferLengthBytes);
 	if (!f->ptr) {
 		free(f);
@@ -186,7 +182,6 @@ int  fwr_pcm_frame_create(struct fwr_session_s *session,
 	if (!f)
 		return -1;
 
-        f->header = audio_v1_header;
 	f->channelCount = channelCount;
 	f->frameCount = frameCount;
 	f->sampleDepth = sampleDepth;
@@ -206,6 +201,10 @@ int  fwr_pcm_frame_create(struct fwr_session_s *session,
 
 int fwr_pcm_frame_write(struct fwr_session_s *session, struct fwr_header_audio_s *frame)
 {
+	uint32_t frame_type = audio_v1_header;
+	if (fwrite(&frame_type, 1, sizeof(frame_type), session->fh) != sizeof(frame_type)) {
+		return -1;
+	}
 	if (fwrite(frame, 1, fwr_header_audio_size_pre, session->fh) != fwr_header_audio_size_pre) {
 		return -1;
 	}
@@ -229,7 +228,6 @@ int fwr_timing_frame_create(struct fwr_session_s *session,
 	if (!f)
 		return -1;
 
-	f->sof = timing_v1_header;
 	f->counter = session->counter++;
 	gettimeofday(&f->ts1, NULL);
 	f->decklinkCaptureMode = decklinkCaptureMode;
@@ -241,6 +239,11 @@ int fwr_timing_frame_create(struct fwr_session_s *session,
 
 int fwr_timing_frame_write(struct fwr_session_s *session, struct fwr_header_timing_s *frame)
 {
+	uint32_t frame_type = timing_v1_header;
+	if (fwrite(&frame_type, 1, sizeof(frame_type), session->fh) != sizeof(frame_type)) {
+		return -1;
+	}
+
 	if (fwrite(frame, 1, sizeof(*frame), session->fh) != sizeof(*frame)) {
 		return -1;
 	}
@@ -253,9 +256,6 @@ int fwr_timing_frame_read(struct fwr_session_s *session, struct fwr_header_timin
 	if (fread(frame, 1, sizeof(*frame), session->fh) != sizeof(*frame)) {
 		return -1;
 	}
-
-	if (frame->sof != timing_v1_header)
-		return -1;
 
 	if (frame->eof != timing_v1_footer)
 		return -1;
@@ -280,13 +280,6 @@ int fwr_video_frame_read(struct fwr_session_s *session, struct fwr_header_video_
 #endif
 	if (fread(f, 1, fwr_header_video_size_pre, session->fh) != fwr_header_video_size_pre) {
 		free(f);
-		return -1;
-	}
-
-	if (f->sof != video_v1_header) {
-#if LOCAL_DEBUG
-		printf("%s() f->sof = 0x%x\n", __func__, f->sof);
-#endif
 		return -1;
 	}
 
@@ -343,7 +336,6 @@ int  fwr_video_frame_create(struct fwr_session_s *session,
 	if (!f)
 		return -1;
 
-        f->sof = video_v1_header;
 	f->width = width;
 	f->height = height;
 	f->strideBytes = strideBytes;
@@ -363,6 +355,10 @@ int  fwr_video_frame_create(struct fwr_session_s *session,
 
 int fwr_video_frame_write(struct fwr_session_s *session, struct fwr_header_video_s *frame)
 {
+	uint32_t frame_type = video_v1_header;;
+	if (fwrite(&frame_type, 1, sizeof(frame_type), session->fh) != sizeof(frame_type)) {
+		return -1;
+	}
 	if (fwrite(frame, 1, fwr_header_video_size_pre, session->fh) != fwr_header_video_size_pre) {
 		return -1;
 	}
@@ -390,13 +386,6 @@ int fwr_vanc_frame_read(struct fwr_session_s *session, struct fwr_header_vanc_s 
 #endif
 	if (fread(f, 1, fwr_header_vanc_size_pre, session->fh) != fwr_header_vanc_size_pre) {
 		free(f);
-		return -1;
-	}
-
-	if (f->sol != VANC_SOL_INDICATOR) {
-#if LOCAL_DEBUG
-		printf("%s() f->sol = 0x%x\n", __func__, f->sol);
-#endif
 		return -1;
 	}
 
@@ -457,7 +446,6 @@ int  fwr_vanc_frame_create(struct fwr_session_s *session,
 	if (!f)
 		return -1;
 
-        f->sol = VANC_SOL_INDICATOR;
 	f->line = line;
 	f->width = width;
 	f->height = height;
@@ -478,6 +466,10 @@ int  fwr_vanc_frame_create(struct fwr_session_s *session,
 
 int fwr_vanc_frame_write(struct fwr_session_s *session, struct fwr_header_vanc_s *frame)
 {
+	uint32_t frame_type = VANC_SOL_INDICATOR;
+	if (fwrite(&frame_type, 1, sizeof(frame_type), session->fh) != sizeof(frame_type)) {
+		return -1;
+	}
 	if (fwrite(frame, 1, fwr_header_vanc_size_pre, session->fh) != fwr_header_vanc_size_pre) {
 		return -1;
 	}
@@ -493,10 +485,9 @@ int fwr_vanc_frame_write(struct fwr_session_s *session, struct fwr_header_vanc_s
 	return 0;
 }
 
-int fwr_session_frame_peek(struct fwr_session_s *session, uint32_t *header)
+int fwr_session_frame_gettype(struct fwr_session_s *session, uint32_t *header)
 {
 	size_t r = fread(header, 1, sizeof(*header), session->fh);
-	fseek(session->fh, -r, SEEK_CUR);
 	if (r != sizeof(*header))
 		return -1;
 

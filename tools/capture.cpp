@@ -576,7 +576,7 @@ static int AnalyzeMuxed(const char *fn)
 	while (1) {
 		fa = 0, fv = 0;
 
-		if (fwr_session_frame_peek(session, &header) < 0) {
+		if (fwr_session_frame_gettype(session, &header) < 0) {
 			break;
 		}
 
@@ -669,10 +669,17 @@ static int AnalyzeAudio(const char *fn)
 
 	while (1) {
 		struct fwr_header_timing_s timing;
-		if (fwr_timing_frame_read(session, &timing) < 0) {
+		uint32_t header;
+		if (fwr_session_frame_gettype(session, &header) < 0) {
 			break;
 		}
-		if (fwr_pcm_frame_read(session, &f) < 0) {
+		if (header != timing_v1_header || fwr_timing_frame_read(session, &timing) < 0) {
+			break;
+		}
+		if (fwr_session_frame_gettype(session, &header) < 0) {
+			break;
+		}
+		if (header != audio_v1_header || fwr_pcm_frame_read(session, &f) < 0) {
 			break;
 		}
 
