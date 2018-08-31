@@ -668,19 +668,12 @@ static int AnalyzeAudio(const char *fn)
 	struct fwr_header_audio_s *f;
 
 	while (1) {
-		struct fwr_header_timing_s timing;
 		uint32_t header;
 		if (fwr_session_frame_gettype(session, &header) < 0) {
 			break;
 		}
-		if (header != timing_v1_header || fwr_timing_frame_read(session, &timing) < 0) {
-			break;
-		}
-		if (fwr_session_frame_gettype(session, &header) < 0) {
-			break;
-		}
 		if (header != audio_v1_header || fwr_pcm_frame_read(session, &f) < 0) {
-			break;
+			continue;
 		}
 
 		frame++;
