@@ -663,8 +663,8 @@ static int AnalyzeAudio(const char *fn)
 		/* Friendly note:
 		 * Convert the PCM into wav using: avconv -y -f s32le -ar 48k -ac 2 -i pairX.bin fileX.wav.
 		 */
-		char name[32];
-		sprintf(name, "%s-pair%d.raw", g_audioInputFilename, i);
+		char name[PATH_MAX];
+		snprintf(name, sizeof(name), "%s-pair%d.raw", g_audioInputFilename, i);
 		ofh[i] = fopen(name, "wb");
 	}
 
