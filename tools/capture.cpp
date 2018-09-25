@@ -31,6 +31,9 @@
 #include "ts_packetizer.h"
 #include "histogram.h"
 
+/* Forward declarations */
+static void convert_colorspace_and_parse_vanc(unsigned char *buf, unsigned int uiWidth, unsigned int lineNr);
+
 /* Decklink portability macros */
 #ifdef _WIN32
 static char *dup_wchar_to_utf8(wchar_t *w)
@@ -616,6 +619,11 @@ static int AnalyzeMuxed(const char *fn)
 			for (int i = 0; i < 32; i++)
 				printf("%02x ", *(fd->ptr + i));
 			printf("\n");
+			/* Process the line colorspace, hand-off to the vanc library for parsing
+			 * and prepare to receive callbacks.
+			 */
+			convert_colorspace_and_parse_vanc(fd->ptr, fd->width, fd->line);
+
 		} else
 		if (header == audio_v1_header) {
 			if (fwr_pcm_frame_read(session, &fa) < 0) {
