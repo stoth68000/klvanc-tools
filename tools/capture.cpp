@@ -171,6 +171,7 @@ static BMDDisplayMode g_detected_mode_id = 0;
 static BMDDisplayMode g_requested_mode_id = 0;
 static BMDVideoInputFlags g_inputFlags = bmdVideoInputEnableFormatDetection;
 static BMDPixelFormat g_pixelFormat = bmdFormat10BitYUV;
+struct fwr_header_timing_s ftfirst, ftlast;
 
 static unsigned int g_analyzeBitmask = 0;
 
@@ -575,7 +576,7 @@ static int AnalyzeMuxed(const char *fn)
 
 	struct fwr_header_audio_s *fa;
 	struct fwr_header_video_s *fv;
-	struct fwr_header_timing_s ft, ftlast;
+	struct fwr_header_timing_s ft;
 	struct fwr_header_vanc_s *fd;
 	uint32_t header;
 
@@ -1485,7 +1486,14 @@ static int cb_EIA_708B(void *callback_context, struct klvanc_context_s *ctx, str
 			caption_data[3*i+1] = pkt->ccdata.cc[i].cc_data[0];
 			caption_data[3*i+2] = pkt->ccdata.cc[i].cc_data[1];
 		}
-		rcwt_write_captions(rcwtOutputFile, pkt->ccdata.cc_count, caption_data, 0);
+		/* RCWT format expects time in millseconds, relative to start of file */
+		struct timeval diff;
+		if (ftfirst.ts1.tv_sec == 0 && ftfirst.ts1.tv_usec == 0)
+			ftfirst = ftlast;
+		fwr_timeval_subtract(&diff, &ftlast.ts1, &ftfirst.ts1);
+
+		rcwt_write_captions(rcwtOutputFile, pkt->ccdata.cc_count, caption_data,
+				    (diff.tv_sec * 1000000 + diff.tv_usec) / 1000);
 	}
 
 	return 0;
