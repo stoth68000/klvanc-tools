@@ -717,9 +717,9 @@ static int AnalyzeAudio(const char *fn)
 		/* Dump each L/R pair to a seperate file. */
 		unsigned char *p = f->ptr;
 		for (int i = 0; i < f->frameCount; i++) {
-			for (int j = 0; j < 8; j++) {
-				fwrite(p, 8, 1, ofh[j]);
-				p += 8;
+			for (int j = 0; j < (f->channelCount / 2); j++) {
+				fwrite(p, 2 * (f->sampleDepth / 8), 1, ofh[j]);
+				p += 2 * (f->sampleDepth / 8);
 			}
 		}
 
