@@ -167,7 +167,7 @@ static int g_shutdown = 0;
 static int g_monitor_reset = 0;
 static int g_monitor_mode = 0;
 static int g_no_signal = 1;
-static BMDDisplayMode g_detected_mode_id = 0;
+static BMDDisplayMode g_detected_mode_id = selectedDisplayMode;
 static BMDDisplayMode g_requested_mode_id = 0;
 static BMDVideoInputFlags g_inputFlags = bmdVideoInputEnableFormatDetection;
 static BMDPixelFormat g_pixelFormat = bmdFormat10BitYUV;
@@ -1088,13 +1088,13 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 	}
 	if (writeSession) {
 		struct fwr_header_timing_s *timing;
-		fwr_timing_frame_create(writeSession, (uint32_t)selectedDisplayMode, &timing);
+		fwr_timing_frame_create(writeSession, (uint32_t)g_detected_mode_id, &timing);
 		fwr_timing_frame_write(writeSession, timing);
 		fwr_timing_frame_free(writeSession, timing);
 	}
 	if (muxedSession) {
 		struct fwr_header_timing_s *timing;
-		fwr_timing_frame_create(muxedSession, (uint32_t)selectedDisplayMode, &timing);
+		fwr_timing_frame_create(muxedSession, (uint32_t)g_detected_mode_id, &timing);
 		fwr_writer_enqueue(muxedSession, timing, FWR_FRAME_TIMING);
 	}
 
