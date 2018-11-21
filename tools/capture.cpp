@@ -15,6 +15,7 @@
 #endif
 #include <libgen.h>
 #include <signal.h>
+#include <limits.h>
 #include <libklvanc/vanc.h>
 #include <libklvanc/smpte2038.h>
 #include "smpte337_detector.h"
