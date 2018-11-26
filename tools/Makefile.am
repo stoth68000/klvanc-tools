@@ -7,11 +7,11 @@ AM_CPPFLAGS = -DVERSION=\"$(VERSION)\" -DPROG="\"$(PACKAGE)\"" -D_FILE_OFFSET_BI
 	-I$(BLACKMAGIC_SDK_PATH) \
 	-I$(top_srcdir)/src \
 	-DGIT_VERSION=\"$(GIT_VERSION)\" \
-	-DKL_USERSPACE -D__STDC_FORMAT_MACROS
+	-DKL_USERSPACE -D__STDC_FORMAT_MACROS $(ZLIB_CFLAGS)
 
 AM_CFLAGS = -Wall -O3
 
-LDADD = -lpthread -lz -ldl -lklvanc
+LDADD = -lpthread -lz -ldl -lklvanc $(ZLIB_LIBS)
 
 if DEBUG
 	CFLAGS += -g

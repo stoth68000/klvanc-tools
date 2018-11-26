@@ -37,12 +37,11 @@ AC_PROG_LIBTOOL
 
 # Checks for header files.
 AC_CHECK_HEADERS([arpa/inet.h fcntl.h netinet/in.h stdint.h stdlib.h string.h sys/ioctl.h sys/socket.h sys/time.h unistd.h])
-AC_CHECK_HEADERS([zlib.h],
-                 [break],
-                 [AC_MSG_ERROR([zlib-dev headers not found or not usable])])
 AC_CHECK_HEADERS([libklvanc/vanc.h],
                  [break],
                  [AC_MSG_ERROR([libklvanc headers not found or not usable])])
+
+PKG_CHECK_MODULES(ZLIB, zlib >= 1.2.9)
 
 # Check for curses (optional)
 AC_CHECK_HEADERS([curses.h], HEADER_LIBCURSES="yes")
