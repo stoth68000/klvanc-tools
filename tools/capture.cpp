@@ -1098,6 +1098,9 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 					frameTime->frameCount, interval, ctime(&now));
 			}
 		} else {
+
+			frameTime->frameCount++;
+
 			g_no_signal = 0;
 			const char *timecodeString = NULL;
 			if (g_timecodeFormat != 0) {
@@ -1198,8 +1201,6 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 
 		if (rightEyeFrame)
 			rightEyeFrame->Release();
-
-		frameTime->frameCount++;
 
 		if (frameTime->frameCount == 100) {
 			//usleep(1100 * 1000);
