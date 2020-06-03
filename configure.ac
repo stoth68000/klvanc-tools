@@ -12,10 +12,12 @@ AM_SILENT_RULES([yes])
 AC_PROG_CC
 AC_PROG_CC_C99
 AC_PROG_CXX
+PLAT_PREFIX=Linux
 if test `uname -s` = "Darwin"
 then
 CFLAGS+=" -I/usr/local/include "
-LDFLAGS+=" -L/usr/local/lib "
+LDFLAGS+=" -L/usr/local/lib -framework CoreFoundation"
+PLAT_PREFIX=Mac
 fi
 CFLAGS+=" -DKL_USERSPACE "
 
@@ -62,9 +64,6 @@ AC_TYPE_UINT8_T
 # Checks for library functions.
 AC_CHECK_FUNCS([memset strrchr])
 
-AC_CONFIG_FILES([Makefile tools/Makefile])
-AC_OUTPUT
-
 # Add debug support
 AC_ARG_ENABLE(debug,
   AS_HELP_STRING(
@@ -80,3 +79,24 @@ AM_CONDITIONAL(DEBUG, test x"$debug" = x"true")
 AM_COND_IF(DEBUG,
     AC_DEFINE(DEBUG, 1, [Define to 0 if this is a release build]),
     AC_DEFINE(DEBUG, 0, [Define to 1 or higher if this is a debug build]))
+
+# Path to Blackmagic SDK
+AC_ARG_WITH([bmsdk],
+            [AS_HELP_STRING([--with-bmsdk=path],
+              [specify alternate path to Blackmagic SDK])],
+            [],
+            [with_bmsdk=no])
+
+AS_IF([test "x$with_bmsdk" != xno],
+            [AC_CHECK_FILE([$with_bmsdk/$PLAT_PREFIX/include/DeckLinkAPI.h],
+              [AC_SUBST([BLACKMAGIC_SDK_PATH], [$with_bmsdk/$PLAT_PREFIX/include])
+               AC_DEFINE([HAVE_BMSDK], [1],
+                         [Define if you have BlackMagic SDK installed])
+              ],
+              [AC_MSG_FAILURE(
+                 [--with-bmsdk was given, but SDK not found at specified path])]
+              )],[AC_MSG_WARN([Falling back to Linux SDK which won't work on other platforms]); AC_SUBST([BLACKMAGIC_SDK_PATH], [${ac_pwd}/include/decklink-sdk])])
+
+AC_CONFIG_FILES([Makefile tools/Makefile])
+AC_OUTPUT
+

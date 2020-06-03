@@ -19,6 +19,7 @@
 #include <libklvanc/smpte2038.h>
 #include "smpte337_detector.h"
 #include "frame-writer.h"
+#include "rcwt.h"
 
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 #include <libklmonitoring/klmonitoring.h>
@@ -29,6 +30,37 @@
 #include "DeckLinkAPI.h"
 #include "ts_packetizer.h"
 #include "histogram.h"
+
+/* Decklink portability macros */
+#ifdef _WIN32
+static char *dup_wchar_to_utf8(wchar_t *w)
+{
+    char *s = NULL;
+    int l = WideCharToMultiByte(CP_UTF8, 0, w, -1, 0, 0, 0, 0);
+    s = (char *) av_malloc(l);
+    if (s)
+        WideCharToMultiByte(CP_UTF8, 0, w, -1, s, l, 0, 0);
+    return s;
+}
+#define DECKLINK_STR    OLECHAR *
+#define DECKLINK_STRDUP dup_wchar_to_utf8
+#define DECKLINK_FREE(s) SysFreeString(s)
+#elif defined(__APPLE__)
+static char *dup_cfstring_to_utf8(CFStringRef w)
+{
+    char s[256];
+    CFStringGetCString(w, s, 255, kCFStringEncodingUTF8);
+    return strdup(s);
+}
+#define DECKLINK_STR    const __CFString *
+#define DECKLINK_STRDUP dup_cfstring_to_utf8
+#define DECKLINK_FREE(s) CFRelease(s)
+#else
+#define DECKLINK_STR    const char *
+#define DECKLINK_STRDUP strdup
+/* free() is needed for a string returned by the DeckLink SDL. */
+#define DECKLINK_FREE(s) free((void *) s)
+#endif
 
 #define WIDE 80
 
@@ -95,6 +127,7 @@ static int audioOutputFile = -1;
 static struct fwr_session_s *writeSession = NULL;
 
 static int vancOutputFile = -1;
+static int rcwtOutputFile = -1;
 static int g_showStartupMemory = 0;
 static int g_verbose = 0;
 static unsigned int g_linenr = 0;
@@ -121,6 +154,7 @@ static const char *g_vancOutputFilename = NULL;
 static const char *g_vancInputFilename = NULL;
 static const char *g_muxedOutputFilename = NULL;
 static const char *g_muxedInputFilename = NULL;
+static const char *g_rcwtOutputFilename = NULL;
 static struct fwr_session_s *muxedSession = NULL;
 static int g_maxFrames = -1;
 static int g_shutdown = 0;
@@ -129,6 +163,10 @@ static int g_monitor_mode = 0;
 static int g_no_signal = 1;
 static BMDDisplayMode g_detected_mode_id = 0;
 static BMDDisplayMode g_requested_mode_id = 0;
+static BMDVideoInputFlags g_inputFlags = bmdVideoInputEnableFormatDetection;
+static BMDPixelFormat g_pixelFormat = bmdFormat10BitYUV;
+
+static unsigned int g_analyzeBitmask = 0;
 
 static int g_enable_smpte337_detector = 0;
 
@@ -257,13 +295,13 @@ static void vanc_monitor_stats_dump_curses()
 	char head_c[160];
 	if (g_no_signal)
 		sprintf(head_c, "NO SIGNAL");
-	else
-	if (g_requested_mode_id == g_detected_mode_id)
-		sprintf(head_c, "SIGNAL LOCKED");
-	else {
-		//sprintf(head_c, "CHECK SIGNAL SETTINGS %x == %x", g_detected_mode_id, g_requested_mode_id);
-		sprintf(head_c, "CHECK SIGNAL SETTINGS");
+	else if (g_requested_mode_id != 0 && g_requested_mode_id != g_detected_mode_id) {
+		sprintf(head_c, "CHECK SIGNAL SETTINGS %c%c%c%c", g_detected_mode_id >> 24,
+			g_detected_mode_id >> 16, g_detected_mode_id >> 8, g_detected_mode_id);
 		headLineColor = 4;
+	} else {
+		sprintf(head_c, "SIGNAL LOCKED %c%c%c%c", g_detected_mode_id >> 24,
+			g_detected_mode_id >> 16, g_detected_mode_id >> 8, g_detected_mode_id);
 	}
 
 	char head_a[160];
@@ -466,8 +504,8 @@ static void signal_handler(int signum)
 		ltn_histogram_reset(hist_audio_sfc);
 		ltn_histogram_reset(hist_format_change);
 	} else {
-		pthread_cond_signal(&sleepCond);
 		g_shutdown = 1;
+		pthread_cond_signal(&sleepCond);
 	}
 }
 
@@ -598,6 +636,7 @@ static int AnalyzeMuxed(const char *fn)
 	}
 
 	fwr_session_file_close(session);
+	return 0;
 }
 
 static int AnalyzeAudio(const char *fn)
@@ -643,16 +682,16 @@ static int AnalyzeAudio(const char *fn)
 
 		printf("id: %8d ch: %d  sfc: %d  depth: %d  stride: %d  bytes: %d\n",
 			frame - 1, f->channelCount, f->frameCount, f->sampleDepth, stride, f->bufferLengthBytes);
-		for (int i = 0; i < f->frameCount; i++) {
-			printf("   frame: %8d  ", i);
-			for (int j = 0; j < stride; j++) {
-
-				if (j && (f->sampleDepth == 32) && ((j % 8) == 0))
-					printf(": ");
-
-				printf("%02x ", *(f->ptr + (i * stride) + j));
+		if (g_verbose) {
+			for (int i = 0; i < f->frameCount; i++) {
+				printf("   frame: %8d  ", i);
+				for (int j = 0; j < stride; j++) {
+					if (j && (f->sampleDepth == 32) && ((j % 8) == 0))
+						printf(": ");
+					printf("%02x ", *(f->ptr + (i * stride) + j));
+				}
+				printf("\n");
 			}
-			printf("\n");
 		}
 
 		if (g_enable_smpte337_detector) {
@@ -699,8 +738,17 @@ static void convert_colorspace_and_parse_vanc(unsigned char *buf, unsigned int u
 	uint16_t decoded_words[16384];
 	memset(&decoded_words[0], 0, sizeof(decoded_words));
 	uint16_t *p_anc = decoded_words;
-	if (klvanc_v210_line_to_nv20_c(src, p_anc, sizeof(decoded_words), (uiWidth / 6) * 6) < 0)
-		return;
+
+	if (uiWidth == 720) {
+		/* Standard definition video will have VANC spanning both
+		   Luma and Chroma channels */
+		klvanc_v210_line_to_uyvy_c(src, p_anc, uiWidth);
+	} else {
+		if (klvanc_v210_line_to_nv20_c(src, p_anc,
+					       sizeof(decoded_words),
+					       (uiWidth / 6) * 6) < 0)
+			return;
+	}
 
 	/* Don't attempt to parse vanc if we're capturing it and the monitor isn't running. */
 	if (!g_monitor_mode && vancOutputFile >= 0)
@@ -784,7 +832,7 @@ static int AnalyzeVANC(const char *fn)
 			}
 			klvanc_smpte2038_packetizer_begin(smpte2038_ctx);
 		}
-		convert_colorspace_and_parse_vanc(buf, uiStride, uiLine);
+		convert_colorspace_and_parse_vanc(buf, uiWidth, uiLine);
 	}
 
 	free(buf);
@@ -1102,13 +1150,16 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 			frameTime->frameCount++;
 
 			g_no_signal = 0;
-			const char *timecodeString = NULL;
+			char *timecodeString = NULL;
+			DECKLINK_STR timecodeStringTmp = NULL;
 			if (g_timecodeFormat != 0) {
 				IDeckLinkTimecode *timecode;
 				if (videoFrame->
 				    GetTimecode(g_timecodeFormat,
 						&timecode) == S_OK) {
-					timecode->GetString(&timecodeString);
+					timecode->GetString(&timecodeStringTmp);
+					timecodeString = DECKLINK_STRDUP(timecodeStringTmp);
+					DECKLINK_FREE(timecodeStringTmp);
 				}
 			}
 
@@ -1182,7 +1233,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 				showMemory(stdout);
 
 			if (timecodeString)
-				free((void *)timecodeString);
+				free(timecodeString);
 
 			if (videoOutputFile != -1) {
 				videoFrame->GetBytes(&frameBytes);
@@ -1378,9 +1429,22 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 
 HRESULT DeckLinkCaptureDelegate::VideoInputFormatChanged(BMDVideoInputFormatChangedEvents events, IDeckLinkDisplayMode * mode, BMDDetectedVideoInputFormatFlags)
 {
+	HRESULT result;
 	ltn_histogram_update_with_timevalue(hist_format_change, 1);
 
-	g_detected_mode_id = mode->GetDisplayMode();
+	if (events & bmdVideoInputDisplayModeChanged) {
+		g_detected_mode_id = mode->GetDisplayMode();
+		if (g_requested_mode_id == 0) {
+			deckLinkInput->PauseStreams();
+			result = deckLinkInput->EnableVideoInput(g_detected_mode_id,
+								 g_pixelFormat, g_inputFlags);
+			if (result != S_OK) {
+				fprintf(stderr, "Failed to enable video input. Is another application using the card? (Result=0x%x\n", result);
+			}
+			deckLinkInput->FlushStreams();
+			deckLinkInput->StartStreams();
+		}
+	}
 	return S_OK;
 }
 
@@ -1396,9 +1460,23 @@ static int cb_AFD(void *callback_context, struct klvanc_context_s *ctx, struct k
 
 static int cb_EIA_708B(void *callback_context, struct klvanc_context_s *ctx, struct klvanc_packet_eia_708b_s *pkt)
 {
+	uint8_t caption_data[128];
+
 	/* Have the library display some debug */
 	if (!g_monitor_mode && g_verbose)
 		klvanc_dump_EIA_708B(ctx, pkt);
+
+	if (rcwtOutputFile >= 0) {
+		if (pkt->ccdata.cc_count * 3 > sizeof(caption_data))
+			return -1;
+		for (size_t i = 0; i < pkt->ccdata.cc_count; i++) {
+			caption_data[3*i+0] =  0xf8 | (pkt->ccdata.cc[i].cc_valid ? 0x04 : 0x00) |
+				(pkt->ccdata.cc[i].cc_type & 0x03);
+			caption_data[3*i+1] = pkt->ccdata.cc[i].cc_data[0];
+			caption_data[3*i+2] = pkt->ccdata.cc[i].cc_data[1];
+		}
+		rcwt_write_captions(rcwtOutputFile, pkt->ccdata.cc_count, caption_data, 0);
+	}
 
 	return 0;
 }
@@ -1481,12 +1559,14 @@ static void listDisplayModes()
 	IDeckLinkDisplayMode *displayMode;
 	while (displayModeIterator->Next(&displayMode) == S_OK) {
 
-		char *displayModeString = NULL;
-		HRESULT result = displayMode->GetName((const char **)&displayModeString);
+		char * displayModeString = NULL;
+		DECKLINK_STR displayModeStringTmp = NULL;
+		HRESULT result = displayMode->GetName(&displayModeStringTmp);
 		if (result == S_OK) {
 			BMDTimeValue frameRateDuration, frameRateScale;
 			displayMode->GetFrameRate(&frameRateDuration, &frameRateScale);
-
+			displayModeString = DECKLINK_STRDUP(displayModeStringTmp);
+			DECKLINK_FREE(displayModeStringTmp);
 			fprintf(stderr, "        %c%c%c%c : %-20s \t %li x %li \t %7g FPS\n",
 				displayMode->GetDisplayMode() >> 24,
 				displayMode->GetDisplayMode() >> 16,
@@ -1511,7 +1591,7 @@ static int usage(const char *progname, int status)
 	fprintf(stderr, COPYRIGHT "\n");
 	fprintf(stderr, "Capture decklink SDI payload, capture vanc, analyze vanc.\n");
 	fprintf(stderr, "Version: " GIT_VERSION "\n");
-	fprintf(stderr, "Usage: %s -m <mode id> [OPTIONS]\n", basename((char *)progname));
+	fprintf(stderr, "Usage: %s [OPTIONS]\n", basename((char *)progname));
 	fprintf(stderr,
 		"    -p <pixelformat>\n"
 		"         0:   8 bit YUV (4:2:2)\n"
@@ -1527,10 +1607,14 @@ static int usage(const char *progname, int status)
 		"                    inspect audio buffers at a byte level. Input should be a file created with -a.\n"
 		"    -V <filename>   raw vanc output filename\n"
 		"    -I <filename>   Interpret and display input VANC filename (See -V)\n"
+		"    -R <filename>   RCWT caption output filename\n"
 		"    -l <linenr>     During -I parse, process a specific line# (def: 0 all)\n"
 		"    -L              List available display modes\n"
-		"    -m <mode>       Eg. Hi59 (1080i59), hp60 (1280x720p60) Hp60 (1080p60) (def: ntsc):\n"
+		"    -m <mode>       Force to capture in specified mode\n"
+		"                    Eg. Hi59 (1080i59), hp60 (1280x720p60) Hp60 (1080p60) (def: ntsc):\n"
 		"                    See -L for a complete list of which modes are supported by the capture hardware.\n"
+		"                    Device will autodetect format if not specified.  If mode is specified, capture\n"
+		"                    will be locked to that mode and 'no signal' will be reported if not matching.\n"
 		"    -c <channels>   Audio Channels (2, 8 or 16 - def: %d)\n"
 		"    -s <depth>      Audio Sample Depth (16 or 32 - def: %d)\n"
 		"    -n <frames>     Number of frames to capture (def: unlimited)\n"
@@ -1595,8 +1679,6 @@ static int _main(int argc, char *argv[])
 	IDeckLinkIterator *deckLinkIterator = CreateDeckLinkIteratorInstance();
 	DeckLinkCaptureDelegate *delegate;
 	IDeckLinkDisplayMode *displayMode;
-	BMDVideoInputFlags inputFlags = bmdVideoInputEnableFormatDetection;
-	BMDPixelFormat pixelFormat = bmdFormat10BitYUV;
 
 	int displayModeCount = 0;
 	int exitStatus = 1;
@@ -1615,7 +1697,8 @@ static int _main(int argc, char *argv[])
 	ltn_histogram_alloc_video_defaults(&hist_audio_sfc, "audio sfc");
 	ltn_histogram_alloc_video_defaults(&hist_format_change, "video format change");
 
-	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MSx:X:")) != -1) {
+	int v;
+	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MSx:X:R:")) != -1) {
 		switch (ch) {
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 		case 'S':
@@ -1676,6 +1759,9 @@ static int _main(int argc, char *argv[])
 		case 'V':
 			g_vancOutputFilename = optarg;
 			break;
+		case 'R':
+			g_rcwtOutputFilename = optarg;
+			break;
 		case 'n':
 			g_maxFrames = atoi(optarg);
 			break;
@@ -1688,18 +1774,18 @@ static int _main(int argc, char *argv[])
 			g_verbose++;
 			break;
 		case '3':
-			inputFlags |= bmdVideoInputDualStream3D;
+			g_inputFlags |= bmdVideoInputDualStream3D;
 			break;
 		case 'p':
 			switch (atoi(optarg)) {
 			case 0:
-				pixelFormat = bmdFormat8BitYUV;
+				g_pixelFormat = bmdFormat8BitYUV;
 				break;
 			case 1:
-				pixelFormat = bmdFormat10BitYUV;
+				g_pixelFormat = bmdFormat10BitYUV;
 				break;
 			case 2:
-				pixelFormat = bmdFormat10BitRGB;
+				g_pixelFormat = bmdFormat10BitRGB;
 				break;
 			default:
 				fprintf(stderr, "Invalid argument: Pixel format %d is not valid", atoi(optarg));
@@ -1737,6 +1823,18 @@ static int _main(int argc, char *argv[])
 		goto bail;
 	}
 
+	if (g_rcwtOutputFilename != NULL) {
+		rcwtOutputFile = open(g_rcwtOutputFilename, O_WRONLY | O_CREAT | O_TRUNC, 0664);
+		if (rcwtOutputFile < 0) {
+			fprintf(stderr, "Could not open rcwt output file \"%s\"\n", g_rcwtOutputFilename);
+			goto bail;
+		}
+		if (rcwt_write_header(rcwtOutputFile, 0xcc, 0x0052) < 0) {
+			fprintf(stderr, "Could not write rcwt header to output file\n");
+			goto bail;
+		}
+	}
+
  	if (g_packetizeSMPTE2038) {
 		unlink(TS_OUTPUT_NAME);
 		if (klvanc_smpte2038_packetizer_alloc(&smpte2038_ctx) < 0) {
@@ -1750,7 +1848,8 @@ static int _main(int argc, char *argv[])
                 exit(1);
         }
 
-	klvanc_context_enable_cache(vanchdl);
+	if (g_monitor_mode)
+		klvanc_context_enable_cache(vanchdl);
 
 	/* We specifically want to see packets that have bad checksums. */
 	vanchdl->allow_bad_checksums = 1;
@@ -1834,13 +1933,13 @@ static int _main(int argc, char *argv[])
 
 	/* Confirm the users requested display mode and other settings are valid for this device. */
 	BMDDisplayModeSupport dm;
-	deckLinkInput->DoesSupportVideoMode(selectedDisplayMode, pixelFormat, bmdVideoInputFlagDefault, &dm, NULL);
+	deckLinkInput->DoesSupportVideoMode(selectedDisplayMode, g_pixelFormat, g_inputFlags, &dm, NULL);
 	if (dm == bmdDisplayModeNotSupported) {
 		fprintf(stderr, "The requested display mode is not supported with the selected pixel format\n");
 		goto bail;
 	}
 
-	result = deckLinkInput->EnableVideoInput(selectedDisplayMode, pixelFormat, inputFlags);
+	result = deckLinkInput->EnableVideoInput(selectedDisplayMode, g_pixelFormat, g_inputFlags);
 	if (result != S_OK) {
 		fprintf(stderr, "Failed to enable video input. Is another application using the card?\n");
 		goto bail;
@@ -1875,7 +1974,8 @@ static int _main(int argc, char *argv[])
 
 	/* Block main thread until signal occurs */
 	pthread_mutex_lock(&sleepMutex);
-	pthread_cond_wait(&sleepCond, &sleepMutex);
+	while (g_shutdown == 0)
+		pthread_cond_wait(&sleepCond, &sleepMutex);
 	pthread_mutex_unlock(&sleepMutex);
 
 	while (g_shutdown != 2)
@@ -1910,6 +2010,8 @@ bail:
 		fwr_session_file_close(muxedSession);
 	if (vancOutputFile)
 		close(vancOutputFile);
+	if (rcwtOutputFile)
+		close(rcwtOutputFile);
 
 	RELEASE_IF_NOT_NULL(displayModeIterator);
 	RELEASE_IF_NOT_NULL(deckLinkInput);
