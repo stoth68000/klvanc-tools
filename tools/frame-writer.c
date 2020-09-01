@@ -91,11 +91,24 @@ int fwr_session_file_open(const char *filename, int writeMode, struct fwr_sessio
 	if (writeMode) {
 		/* If file ends in .gz, create compressed file with "Best Performance",
 		   otherwise open in transparent mode where gzwrite() is a passthrough */
-		if (strlen(filename) > 3 && strcmp(&filename[strlen(filename) - 3] , ".gz") == 0)
+
+		if (strlen(filename) > 3 && strcmp(&filename[strlen(filename) - 3] , ".gz") == 0) {
+#if !HAVE_ZLIB
+			fprintf(stderr, "Error: Cannot create gzip files because not compiled with zlib\n");
+			return -1;
+#else
 			s->fh = gzopen(filename, "wb1");
-		else
+#endif
+		} else {
 			s->fh = gzopen(filename, "wbT");
+		}
 	} else {
+#if !HAVE_ZLIB
+		if (strlen(filename) > 3 && strcmp(&filename[strlen(filename) - 3] , ".gz") == 0) {
+			fprintf(stderr, "Error: Cannot read gzip files because not compiled with zlib\n");
+			return -1;
+		}
+#endif
 		s->fh = gzopen(filename, "rb");
 	}
 

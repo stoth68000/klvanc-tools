@@ -41,7 +41,7 @@ AC_CHECK_HEADERS([libklvanc/vanc.h],
                  [break],
                  [AC_MSG_ERROR([libklvanc headers not found or not usable])])
 
-PKG_CHECK_MODULES(ZLIB, zlib >= 1.2.9)
+PKG_CHECK_MODULES(ZLIB, zlib >= 1.2.9, AC_DEFINE(HAVE_ZLIB, 1, [zlib is present]), AC_DEFINE(HAVE_ZLIB, 0, [zlib is absent]))
 
 # Check for curses (optional)
 AC_CHECK_HEADERS([curses.h], HEADER_LIBCURSES="yes")

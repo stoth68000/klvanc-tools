@@ -9,7 +9,6 @@
 #include <fcntl.h>
 #include <sys/time.h>
 #include <assert.h>
-#include <zlib.h>
 #if HAVE_CURSES_H
 #include <curses.h>
 #endif

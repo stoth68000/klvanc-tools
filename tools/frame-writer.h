@@ -39,8 +39,19 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <pthread.h>
-#include <zlib.h>
 #include "xorg-list.h"
+
+/* We use functions that are only available in newer versions of zlib, so
+   passthrough to fopen/fread if a recent zlib is not available */
+#if HAVE_ZLIB
+#include <zlib.h>
+#else
+#define gzFile FILE *
+#define gzopen fopen
+#define gzfread fread
+#define gzfwrite fwrite
+#define gzclose fclose
+#endif
 
 #ifdef __cplusplus
 extern "C" {
