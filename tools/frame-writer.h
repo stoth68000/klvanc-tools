@@ -41,6 +41,18 @@
 #include <pthread.h>
 #include "xorg-list.h"
 
+/* We use functions that are only available in newer versions of zlib, so
+   passthrough to fopen/fread if a recent zlib is not available */
+#if HAVE_ZLIB
+#include <zlib.h>
+#else
+#define gzFile FILE *
+#define gzopen fopen
+#define gzfread fread
+#define gzfwrite fwrite
+#define gzclose fclose
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif  
@@ -50,7 +62,6 @@ extern "C" {
 
 struct fwr_header_audio_s
 {
-	uint32_t header;            /* See audio_v1_header */
 	struct timeval ts;
 	uint32_t channelCount;      /* 2-16 */
 	uint32_t frameCount;        /* Number of samples per channel, in this buffer. */
@@ -64,7 +75,7 @@ struct fwr_header_audio_s
 
 struct fwr_session_s
 {
-	FILE *fh;
+	gzFile fh;
 	int type; /* 1 = PCM_AUDIO. */
 
 	uint64_t counter;
@@ -122,7 +133,7 @@ void fwr_session_file_close(struct fwr_session_s *session);
  * @return        0 - Success
  * @return      < 0 - Error
  */
-int  fwr_session_frame_peek(struct fwr_session_s *session, uint32_t *header);
+int  fwr_session_frame_gettype(struct fwr_session_s *session, uint32_t *header);
 
 /**
  * @brief       From the READ session, allocate and populate an audio structure from the current file pointer.
@@ -173,7 +184,6 @@ int fwr_pcm_frame_write(struct fwr_session_s *session, struct fwr_header_audio_s
 #define timing_v1_footer 0xC0DEADDF
 struct fwr_header_timing_s
 {
-	uint32_t       sof;
 	uint64_t       counter;
 	struct timeval ts1;
 	uint32_t       decklinkCaptureMode;
@@ -223,7 +233,6 @@ void fwr_timing_frame_free(struct fwr_session_s *session, struct fwr_header_timi
 #define video_v1_footer 0xDFFEADDE
 struct fwr_header_video_s
 {
-	uint32_t sof;
 	uint32_t width;
 	uint32_t height;
 	uint32_t strideBytes;
@@ -283,7 +292,6 @@ int fwr_video_frame_write(struct fwr_session_s *session, struct fwr_header_video
 #define VANC_EOL_INDICATOR 0xEDFEADDE
 struct fwr_header_vanc_s
 {
-	uint32_t sol;
 	uint32_t line;
 	uint32_t width;
 	uint32_t height;
