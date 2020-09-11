@@ -9,12 +9,12 @@
 #include <fcntl.h>
 #include <sys/time.h>
 #include <assert.h>
-#include <zlib.h>
 #if HAVE_CURSES_H
 #include <curses.h>
 #endif
 #include <libgen.h>
 #include <signal.h>
+#include <limits.h>
 #include <libklvanc/vanc.h>
 #include <libklvanc/smpte2038.h>
 #include "smpte337_detector.h"
@@ -30,6 +30,9 @@
 #include "DeckLinkAPI.h"
 #include "ts_packetizer.h"
 #include "histogram.h"
+
+/* Forward declarations */
+static void convert_colorspace_and_parse_vanc(unsigned char *buf, unsigned int uiWidth, unsigned int lineNr);
 
 /* Decklink portability macros */
 #ifdef _WIN32
@@ -153,6 +156,9 @@ static const char *g_audioInputFilename = NULL;
 static const char *g_vancOutputFilename = NULL;
 static const char *g_vancInputFilename = NULL;
 static const char *g_muxedOutputFilename = NULL;
+static int g_muxedOutputExcludeVideo = 0;
+static int g_muxedOutputExcludeAudio = 0;
+static int g_muxedOutputExcludeData = 0;
 static const char *g_muxedInputFilename = NULL;
 static const char *g_rcwtOutputFilename = NULL;
 static struct fwr_session_s *muxedSession = NULL;
@@ -161,10 +167,11 @@ static int g_shutdown = 0;
 static int g_monitor_reset = 0;
 static int g_monitor_mode = 0;
 static int g_no_signal = 1;
-static BMDDisplayMode g_detected_mode_id = 0;
+static BMDDisplayMode g_detected_mode_id = selectedDisplayMode;
 static BMDDisplayMode g_requested_mode_id = 0;
 static BMDVideoInputFlags g_inputFlags = bmdVideoInputEnableFormatDetection;
 static BMDPixelFormat g_pixelFormat = bmdFormat10BitYUV;
+struct fwr_header_timing_s ftfirst, ftlast;
 
 static unsigned int g_analyzeBitmask = 0;
 
@@ -569,14 +576,14 @@ static int AnalyzeMuxed(const char *fn)
 
 	struct fwr_header_audio_s *fa;
 	struct fwr_header_video_s *fv;
-	struct fwr_header_timing_s ft, ftlast;
+	struct fwr_header_timing_s ft;
 	struct fwr_header_vanc_s *fd;
 	uint32_t header;
 
 	while (1) {
 		fa = 0, fv = 0;
 
-		if (fwr_session_frame_peek(session, &header) < 0) {
+		if (fwr_session_frame_gettype(session, &header) < 0) {
 			break;
 		}
 
@@ -613,6 +620,11 @@ static int AnalyzeMuxed(const char *fn)
 			for (int i = 0; i < 32; i++)
 				printf("%02x ", *(fd->ptr + i));
 			printf("\n");
+			/* Process the line colorspace, hand-off to the vanc library for parsing
+			 * and prepare to receive callbacks.
+			 */
+			convert_colorspace_and_parse_vanc(fd->ptr, fd->width, fd->line);
+
 		} else
 		if (header == audio_v1_header) {
 			if (fwr_pcm_frame_read(session, &fa) < 0) {
@@ -660,20 +672,20 @@ static int AnalyzeAudio(const char *fn)
 		/* Friendly note:
 		 * Convert the PCM into wav using: avconv -y -f s32le -ar 48k -ac 2 -i pairX.bin fileX.wav.
 		 */
-		char name[32];
-		sprintf(name, "%s-pair%d.raw", g_audioInputFilename, i);
+		char name[PATH_MAX];
+		snprintf(name, sizeof(name), "%s-pair%d.raw", g_audioInputFilename, i);
 		ofh[i] = fopen(name, "wb");
 	}
 
 	struct fwr_header_audio_s *f;
 
 	while (1) {
-		struct fwr_header_timing_s timing;
-		if (fwr_timing_frame_read(session, &timing) < 0) {
+		uint32_t header;
+		if (fwr_session_frame_gettype(session, &header) < 0) {
 			break;
 		}
-		if (fwr_pcm_frame_read(session, &f) < 0) {
-			break;
+		if (header != audio_v1_header || fwr_pcm_frame_read(session, &f) < 0) {
+			continue;
 		}
 
 		frame++;
@@ -705,9 +717,9 @@ static int AnalyzeAudio(const char *fn)
 		/* Dump each L/R pair to a seperate file. */
 		unsigned char *p = f->ptr;
 		for (int i = 0; i < f->frameCount; i++) {
-			for (int j = 0; j < 8; j++) {
-				fwrite(p, 8, 1, ofh[j]);
-				p += 8;
+			for (int j = 0; j < (f->channelCount / 2); j++) {
+				fwrite(p, 2 * (f->sampleDepth / 8), 1, ofh[j]);
+				p += 2 * (f->sampleDepth / 8);
 			}
 		}
 
@@ -883,7 +895,7 @@ static void ProcessVANC(IDeckLinkVideoInputFrame * frame)
 		 */
 		convert_colorspace_and_parse_vanc(buf, uiWidth, uiLine);
 
-		if (muxedSession && buf) {
+		if (muxedSession && g_muxedOutputExcludeData == 0 && buf) {
 			struct fwr_header_vanc_s *frame = 0;
 			if (fwr_vanc_frame_create(muxedSession, uiLine, uiWidth, uiHeight, uiStride, (uint8_t *)buf, &frame) == 0) {
 				fwr_writer_enqueue(muxedSession, frame, FWR_FRAME_VANC);
@@ -1076,13 +1088,13 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 	}
 	if (writeSession) {
 		struct fwr_header_timing_s *timing;
-		fwr_timing_frame_create(writeSession, (uint32_t)selectedDisplayMode, &timing);
+		fwr_timing_frame_create(writeSession, (uint32_t)g_detected_mode_id, &timing);
 		fwr_timing_frame_write(writeSession, timing);
 		fwr_timing_frame_free(writeSession, timing);
 	}
 	if (muxedSession) {
 		struct fwr_header_timing_s *timing;
-		fwr_timing_frame_create(muxedSession, (uint32_t)selectedDisplayMode, &timing);
+		fwr_timing_frame_create(muxedSession, (uint32_t)g_detected_mode_id, &timing);
 		fwr_writer_enqueue(muxedSession, timing, FWR_FRAME_TIMING);
 	}
 
@@ -1097,7 +1109,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 		g_showStartupMemory = 0;
 	}
 
-	if (muxedSession && videoFrame) {
+	if (muxedSession && g_muxedOutputExcludeVideo == 0 && videoFrame) {
 		struct fwr_header_video_s *frame;
 		videoFrame->GetBytes(&frameBytes);
 
@@ -1299,7 +1311,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 			}
 		}
 
-		if (muxedSession) {
+		if (muxedSession && g_muxedOutputExcludeAudio == 0) {
 			audioFrame->GetBytes(&audioFrameBytes);
 			struct fwr_header_audio_s *frame = 0;
 			if (fwr_pcm_frame_create(muxedSession, audioFrame->GetSampleFrameCount(), g_audioSampleDepth, g_audioChannels, (const uint8_t *)audioFrameBytes, &frame) == 0) {
@@ -1475,7 +1487,14 @@ static int cb_EIA_708B(void *callback_context, struct klvanc_context_s *ctx, str
 			caption_data[3*i+1] = pkt->ccdata.cc[i].cc_data[0];
 			caption_data[3*i+2] = pkt->ccdata.cc[i].cc_data[1];
 		}
-		rcwt_write_captions(rcwtOutputFile, pkt->ccdata.cc_count, caption_data, 0);
+		/* RCWT format expects time in millseconds, relative to start of file */
+		struct timeval diff;
+		if (ftfirst.ts1.tv_sec == 0 && ftfirst.ts1.tv_usec == 0)
+			ftfirst = ftlast;
+		fwr_timeval_subtract(&diff, &ftlast.ts1, &ftfirst.ts1);
+
+		rcwt_write_captions(rcwtOutputFile, pkt->ccdata.cc_count, caption_data,
+				    (diff.tv_sec * 1000000 + diff.tv_usec) / 1000);
 	}
 
 	return 0;
@@ -1630,6 +1649,9 @@ static int usage(const char *progname, int status)
 		"    -S              Validate PRBS15 sequences are correct on all audio channels (def: disabled).\n"
 #endif
 		"    -x <filename>   Create a muxed audio+video+vanc output file.\n"
+		"    -ev             Exclude video from muxed output file.\n"
+		"    -ea             Exclude audio from muxed output file.\n"
+		"    -ed             Exclude data (vanc) from muxed output file.\n"
 		"    -X <filename>   Analyze a muxed audio+video+vanc input file.\n"
 		"\n"
 		"Capture raw video and audio to file then playback. 1920x1080p30, 50 complete frames, PCM audio, 8bit mode:\n"
@@ -1698,7 +1720,7 @@ static int _main(int argc, char *argv[])
 	ltn_histogram_alloc_video_defaults(&hist_format_change, "video format change");
 
 	int v;
-	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MSx:X:R:")) != -1) {
+	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MSx:X:R:e:")) != -1) {
 		switch (ch) {
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 		case 'S':
@@ -1719,6 +1741,22 @@ static int _main(int argc, char *argv[])
 			break;
 		case 'X':
 			g_muxedInputFilename = optarg;
+			break;
+		case 'e':
+			switch (optarg[0]) {
+			case 'v':
+				g_muxedOutputExcludeVideo = 1;
+				break;
+			case 'a':
+				g_muxedOutputExcludeAudio = 1;
+				break;
+			case 'd':
+				g_muxedOutputExcludeData = 1;
+				break;
+			default:
+				fprintf(stderr, "Only valid types to exclude are video/audio/data\n");
+				goto bail;
+			}
 			break;
 		case 'c':
 			g_audioChannels = atoi(optarg);
