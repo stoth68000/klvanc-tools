@@ -209,6 +209,18 @@ static void dumpAudio(uint16_t *ptr, int fc, int num_channels)
 static pthread_t g_monitor_draw_threadId;
 static pthread_t g_monitor_input_threadId;
 
+static void cursor_save_all()
+{
+	for (int d = 0; d <= 0xff; d++) {
+		for (int s = 0; s <= 0xff; s++) {
+			struct klvanc_cache_s *e = klvanc_cache_lookup(vanchdl, d, s);
+			if (!e->activeCount)
+				continue;
+			e->save = 1;
+		}
+	}
+}
+
 static void cursor_expand_all()
 {
 	for (int d = 0; d <= 0xff; d++) {
@@ -354,6 +366,12 @@ static void vanc_monitor_stats_dump_curses()
 				mvprintw(linecount++, 13, "line #%d count #%lu horizontal offset word #%d", l, line->count,
 					pkt->horizontalOffset);
 
+				if (e->save)
+				{
+					klvanc_packet_save("/tmp", pkt, -1, -1);
+					e->save = 0;
+				}
+
 				if (e->expandUI)
 				{
 					mvprintw(linecount++, 13, "data length: 0x%x (%d)",
@@ -385,7 +403,7 @@ static void vanc_monitor_stats_dump_curses()
 	}
 
 	attron(COLOR_PAIR(2));
-        mvprintw(linecount++, 0, "q)uit r)eset e)xpand E)xpand all");
+        mvprintw(linecount++, 0, "q)uit r)eset e)xpand S)ave all E)xpand all");
 	attroff(COLOR_PAIR(2));
 
 	char tail_c[160];
@@ -439,6 +457,8 @@ static void *thread_func_input(void *p)
 			g_monitor_reset = 1;
 		if (ch == 'e')
 			cursor_expand();
+		if (ch == 'S')
+			cursor_save_all();
 		if (ch == 'E')
 			cursor_expand_all();
 		if (ch == 0x1b) {
