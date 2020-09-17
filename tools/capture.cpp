@@ -155,6 +155,7 @@ static const char *g_audioOutputFilename = NULL;
 static const char *g_audioInputFilename = NULL;
 static const char *g_vancOutputFilename = NULL;
 static const char *g_vancInputFilename = NULL;
+static const char *g_vancOutputDir = NULL; /* Dir prefix to use, when saving VANC packets to disk. */
 static const char *g_muxedOutputFilename = NULL;
 static int g_muxedOutputExcludeVideo = 0;
 static int g_muxedOutputExcludeAudio = 0;
@@ -1525,6 +1526,18 @@ static int cb_SCTE_104(void *callback_context, struct klvanc_context_s *ctx, str
 
 static int cb_all(void *callback_context, struct klvanc_context_s *ctx, struct klvanc_packet_header_s *pkt)
 {
+	/* Save the packet to disk, if reqd. */
+	if (g_vancOutputDir) {
+		int requestedLine = g_linenr;
+		if (requestedLine == 0)
+			requestedLine = -1; /* All lines */
+
+		klvanc_packet_save(g_vancOutputDir,
+			(const struct klvanc_packet_header_s *)pkt,
+			requestedLine,
+			-1 /* did */);
+	}
+
 #if HAVE_CURSES_H
 #if 0
 	vanc_monitor_update(ctx, pkt, &selected);
@@ -1653,6 +1666,7 @@ static int usage(const char *progname, int status)
 		"    -ea             Exclude audio from muxed output file.\n"
 		"    -ed             Exclude data (vanc) from muxed output file.\n"
 		"    -X <filename>   Analyze a muxed audio+video+vanc input file.\n"
+		"    -T <dirname>    Save all vanc messages into dirname as a seperate unique file (16bit words).\n"
 		"\n"
 		"Capture raw video and audio to file then playback. 1920x1080p30, 50 complete frames, PCM audio, 8bit mode:\n"
 		"    %s -mHp30 -n 50 -f video.raw -a audio.raw -p0\n"
@@ -1691,6 +1705,13 @@ static int usage(const char *progname, int status)
 		"\t\t-mhp60 -p1 -x capture.mx\n"
 		"\t5b) Inspect a previously captured mx file (WORK IN PROGRESS):\n"
 		"\t\t-X capture.mx\n"
+		"6) Capture only VANC to a muxed single file for offline inspection 1280x720p59.94 (10bit):\n"
+		"\t6a) Capture the signal to disk, discarding audio and video (platform endian format):\n"
+		"\t\t-mhp59 -p1 -x capture.mx -ea -ev\n"
+		"\t6b) Inspect a previously captured file, save VANC packets to /tmp/mypackets dir:\n"
+		"\t\t-X capture.mx -T /tmp/mypackets\n"
+		"\t6c) Only save VANC packet on line 13 to dir /tmp/mypackets:\n"
+		"\t\t-X capture.mx -T /tmp/mypackets -l 13\n"
 	);
 
 	exit(status);
@@ -1720,7 +1741,7 @@ static int _main(int argc, char *argv[])
 	ltn_histogram_alloc_video_defaults(&hist_format_change, "video format change");
 
 	int v;
-	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MSx:X:R:e:")) != -1) {
+	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MSx:X:R:e:T:")) != -1) {
 		switch (ch) {
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 		case 'S':
@@ -1849,6 +1870,9 @@ static int _main(int argc, char *argv[])
 			} else {
 				/* Success */
 			}
+			break;
+		case 'T':
+			g_vancOutputDir = strdup(optarg);
 			break;
 		case '?':
 		case 'h':
