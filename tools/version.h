@@ -19,4 +19,4 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-#define COPYRIGHT "Copyright Kernel Labs Inc 2014-2018. All Rights Reserved."
+#define COPYRIGHT "Copyright Kernel Labs Inc 2014-2020. All Rights Reserved."
