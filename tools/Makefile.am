@@ -27,12 +27,14 @@ SRC += klringbuffer.c
 SRC += frame-writer.c
 SRC += smpte337_detector.c
 SRC += rcwt.c
+SRC += Config.cpp db.cpp transmitter.cpp
 
 #bin_PROGRAMS  = klvanc_util
-bin_PROGRAMS  = klvanc_capture
+bin_PROGRAMS  = klvanc_capture klvanc_transmitter
 
 #klvanc_util_SOURCES = $(SRC)
 klvanc_capture_SOURCES = $(SRC)
+klvanc_transmitter_SOURCES = $(SRC)
 
 libklvanc_noinst_includedir = $(includedir)
 

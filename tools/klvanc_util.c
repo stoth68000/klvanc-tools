@@ -25,6 +25,7 @@
 
 /* External tool hooks */
 extern int capture_main(int argc, char *argv[]);
+extern int transmitter_main(int argc, char *argv[]);
 
 typedef int (*func_ptr)(int, char *argv[]);
 
@@ -35,6 +36,7 @@ int main(int argc, char *argv[])
 		func_ptr func;
 	} apps[] = {
 		{ "klvanc_capture",		capture_main, },
+		{ "klvanc_transmitter",		transmitter_main, },
 		{ 0, 0 },
 	};
 	char *appname = basename(argv[0]);
