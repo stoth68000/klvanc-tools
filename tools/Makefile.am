@@ -7,7 +7,7 @@ AM_CPPFLAGS = -DVERSION=\"$(VERSION)\" -DPROG="\"$(PACKAGE)\"" -D_FILE_OFFSET_BI
 	-I$(BLACKMAGIC_SDK_PATH) \
 	-I$(top_srcdir)/src \
 	-DGIT_VERSION=\"$(GIT_VERSION)\" \
-	-DKL_USERSPACE -D__STDC_FORMAT_MACROS $(ZLIB_CFLAGS)
+	-DKL_USERSPACE -D__STDC_FORMAT_MACROS $(ZLIB_CFLAGS) -std=c++11
 
 AM_CFLAGS = -Wall -O3
 
@@ -27,6 +27,7 @@ SRC += klringbuffer.c
 SRC += frame-writer.c
 SRC += smpte337_detector.c
 SRC += rcwt.c
+SRC += nielsen.cpp
 SRC += Config.cpp db.cpp transmitter.cpp
 
 #bin_PROGRAMS  = klvanc_util
@@ -40,3 +41,4 @@ libklvanc_noinst_includedir = $(includedir)
 
 noinst_HEADERS  = hexdump.h
 noinst_HEADERS += version.h
+noinst_HEADERS += nielsen.h

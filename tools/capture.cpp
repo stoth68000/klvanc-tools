@@ -25,6 +25,14 @@
 #include <libklmonitoring/klmonitoring.h>
 #endif
 
+#if HAVE_IMONITORSDKPROCESSOR_H
+#define ENABLE_NIELSEN 1
+#endif
+
+#if ENABLE_NIELSEN
+#include "nielsen.h"
+#endif
+
 #include "hexdump.h"
 #include "version.h"
 #include "DeckLinkAPI.h"
@@ -182,6 +190,14 @@ static int g_enable_smpte337_detector = 0;
 static int g_monitor_prbs_audio_mode = 0;
 static struct prbs_context_s g_prbs;
 static int g_prbs_initialized = 0;
+#endif
+
+static int g_enable_nielsen = 0;
+#if ENABLE_NIELSEN
+/* We're assuming a max of 8 pairs */
+CMonitorApi *pNielsenAPI[16] = { 0 };
+CMonitorSdkParameters *pNielsenParams[16] = { 0 };
+CMonitorSdkCallback *pNielsenCallback[16] = { 0 };
 #endif
 
 static unsigned long audioFrameCount = 0;
@@ -1323,6 +1339,29 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 				interval);
 		}
 
+#if ENABLE_NIELSEN
+		if (g_enable_nielsen && audioFrame) {
+			/* We only support 32bit samples, which happens to be the klvanc_capture tool default. */
+			if (g_audioSampleDepth == 32) {
+				audioFrame->GetBytes(&audioFrameBytes);
+				uint32_t *p = (uint32_t *)audioFrameBytes;
+				/* This is a little messy, calling the API hundreds of times per buffer. Good enough for now. */
+				for (int i = 0; i < audioFrame->GetSampleFrameCount(); i++) {
+					for (int j = 0; j < g_audioChannels / 2; j++) {
+						p++; /* Right */
+
+						/* Left channel on Pair X */
+						uint8_t *x = (uint8_t *)p;
+						//fprintf(stdout, "%02x %02x %02x %02x\n", *(x + 0), *(x + 1), *(x + 2), *(x + 3));
+						pNielsenAPI[j]->InputAudioData((uint8_t *)x, 4);
+
+						p++;
+					}
+				}
+			}
+		}
+#endif
+
 		if (writeSession) {
 			audioFrame->GetBytes(&audioFrameBytes);
 			struct fwr_header_audio_s *frame = 0;
@@ -1678,6 +1717,10 @@ static int usage(const char *progname, int status)
 #if HAVE_CURSES_H
 		"    -M              During VANC capture, display a Curses onscreen UI.\n"
 #endif
+#if ENABLE_NIELSEN
+		"    -N              During live capture, for all audio pairs (left ch only), enable Nielsen code extraction to console.\n"
+		"                    *** Does not work with bitstream audio, regular PCM audio only ***\n"
+#endif
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 		"    -S              Validate PRBS15 sequences are correct on all audio channels (def: disabled).\n"
 #endif
@@ -1732,6 +1775,12 @@ static int usage(const char *progname, int status)
 		"\t\t-X capture.mx -T /tmp/mypackets\n"
 		"\t6c) Only save VANC packet on line 13 to dir /tmp/mypackets:\n"
 		"\t\t-X capture.mx -T /tmp/mypackets -l 13\n"
+#if ENABLE_NIELSEN
+		"7) Analyze signal for Nielsen codes. Displays a JSON summary every 60 seconds:\n"
+		"\t7a) For a 1280x720p59.94 input signal, anaylyze all pairs all channels 0-15:\n"
+		"\t    Make sure you specifiy 16 audio channels and 32bit depth (they're the current defaults):\n"
+		"\t\t -mhp59 -N\n"
+#endif
 	);
 
 	exit(status);
@@ -1760,8 +1809,32 @@ static int _main(int argc, char *argv[])
 	ltn_histogram_alloc_video_defaults(&hist_audio_sfc, "audio sfc");
 	ltn_histogram_alloc_video_defaults(&hist_format_change, "video format change");
 
+#if ENABLE_NIELSEN
+	/* Enable nielsen on pair 1 */
+	for (int i = 0; i < g_audioChannels / 2; i++) {
+		pNielsenParams[i] = new CMonitorSdkParameters();
+		pNielsenParams[i]->SetSampleSize(32);
+		pNielsenParams[i]->SetPackingMode(FourBytesMsbPadding);
+		pNielsenParams[i]->SetSampleRate(48000);
+		if (pNielsenParams[i]->ValidateAllSettings() != 1) {
+			fprintf(stderr, "Error validating nielsen parameters for pair %d, aborting.\n", i);
+			exit(0);
+		}
+
+		pNielsenCallback[i] = new CMonitorSdkCallback(i);
+		pNielsenAPI[i] = new CMonitorApi(pNielsenParams[i], pNielsenCallback[i]);
+		pNielsenAPI[i]->SetIncludeDetailedReport(1);
+		pNielsenAPI[i]->Initialize();
+		if (pNielsenAPI[i]->IsProcessorInitialized() != 1) {
+			fprintf(stderr, "Error initializing nielsen decoder for pair %d, aborting.\n", i);
+			exit(0);
+		}
+	}
+#endif
+
+
 	int v;
-	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MSx:X:R:e:T:")) != -1) {
+	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MNSx:X:R:e:T:")) != -1) {
 		switch (ch) {
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 		case 'S':
@@ -1847,6 +1920,11 @@ static int _main(int argc, char *argv[])
 #if HAVE_CURSES_H
 		case 'M':
 			g_monitor_mode = 1;
+			break;
+#endif
+#if ENABLE_NIELSEN
+		case 'N':
+			g_enable_nielsen = 1;
 			break;
 #endif
 		case 'v':
@@ -2078,6 +2156,14 @@ static int _main(int argc, char *argv[])
 #if HAVE_CURSES_H
 	if (g_monitor_mode)
 		endwin();
+#endif
+
+#if ENABLE_NIELSEN
+	for (int i = 0; i < g_audioChannels / 2; i++) {
+		delete pNielsenAPI[i];
+		delete pNielsenCallback[i];
+		delete pNielsenParams[i];
+	}
 #endif
 
 bail:

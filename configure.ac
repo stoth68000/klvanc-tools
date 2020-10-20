@@ -56,6 +56,15 @@ if test "x$HEADER_LIBKLMONITORING" == "xyes" ; then
 fi
 AM_CONDITIONAL(LIBKLMONITORING, test x"$HEADER_LIBKLMONITORING" == x"yes")
 
+# Check for Nielsen decoder SDK, optional.
+AC_LANG_PUSH([C++])
+AC_CHECK_HEADERS([IMonitorSdkProcessor.h], HEADER_NIELSENSDK="yes")
+if test "x$HEADER_NIELSENSDK" == "xyes" ; then
+    LDFLAGS+=" -lMonitorSdk -lNaes2HybridDecoder -lNaes2HFDecoder -lNaes6Decoder -lCBETDecoder -lNielsenAudioCore "
+fi
+AM_CONDITIONAL(NIELSENSDK, test x"$HEADER_NIELSENSDK" == x"yes")
+AC_LANG_POP([C++])
+
 # Checks for typedefs, structures, and compiler characteristics.
 AC_TYPE_UINT16_T
 AC_TYPE_UINT8_T
