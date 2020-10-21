@@ -22,6 +22,10 @@ A tool to capture, inspect or monitor Blackmagic SDI signals.
 #/usr/local/share/man/man8/tstools_nic_monitor.8
 
 %changelog
+* Wed Oct 21 2020 Steven Toth <steven.toth@ltnglobal.com> 
+- v1.1.0
+  Added Nielsen detection support to klvanc_capture
+
 * Fri Sep 18 2020 Steven Toth <steven.toth@ltnglobal.com> 
 - v1.0.0
   Initial RPM release
