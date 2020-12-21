@@ -221,6 +221,81 @@ static void dumpAudio(uint16_t *ptr, int fc, int num_channels)
 }
 #endif
 
+void genericDumpAudioPayload(IDeckLinkAudioInputPacket* audioFrame, int audioChannelCount, int audioSampleDepth)
+{
+	assert(audioChannelCount == 16);
+	assert(audioSampleDepth == 32);
+
+	if (!audioFrame)
+		return;
+
+	uint8_t *data = NULL;
+	audioFrame->GetBytes((void **)&data);
+
+	uint32_t *p = (uint32_t *)data;
+
+	for (int s = 0; s < audioFrame->GetSampleFrameCount(); s++) {
+		printf("%06d : ", s);
+		for (int i = 0; i < audioChannelCount; i++) {
+			printf("%08x ", *p);
+			p++;
+		}
+		printf("\n");
+	}
+	printf("\n\n");
+
+}
+
+static int silenceDetectCount = 0;
+static int sequentialAudioSilence[16] = { 0 };
+static int sequentialAudioSilenceLast[16] = { 0 };
+
+void checkForSilence(IDeckLinkAudioInputPacket* audioFrame, int channelNr, int audioChannelCount, int audioSampleDepth)
+{
+	assert(audioChannelCount == 16);
+	assert(audioSampleDepth == 32);
+
+	if (!audioFrame)
+		return;
+
+	uint8_t *data = NULL;
+	audioFrame->GetBytes((void **)&data);
+
+	uint32_t *p = (uint32_t *)data;
+	p += channelNr; /* Adjust the offset to the start of the channel we are inspecting */
+	int silence = 0;
+	int lastSilenceIdx = -1;
+
+	/* 720p59.94 default to 24, 1080i default to 48 */
+	int limit = 24;
+	if (audioFrame->GetSampleFrameCount() > 800)
+		limit = 48;
+
+	for (int s = 0; s < audioFrame->GetSampleFrameCount(); s++) {
+		uint32_t dw = *p;
+		if (dw == 0) {
+			//printf("silence at %d last %d\n", s, lastSilenceIdx);
+			silence++;
+			sequentialAudioSilence[channelNr]++;
+		} else {
+			sequentialAudioSilence[channelNr] = 0;
+		}
+		//printf("%08x\n", dw);
+
+		p += audioChannelCount;
+	}
+
+	if (silence > limit) {
+		silenceDetectCount++;
+		time_t now;
+		time(&now);
+		printf("\n\nSilence detected on channel %d (count #%d) @ %s\n", channelNr, silence, ctime(&now));
+		if (channelNr == 0) {
+			//genericDumpAudioPayload(audioFrame, audioChannelCount, audioSampleDepth);
+		}
+	}
+}
+
 #if HAVE_CURSES_H
 static pthread_t g_monitor_draw_threadId;
 static pthread_t g_monitor_input_threadId;
@@ -1119,6 +1194,13 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 	if (g_shutdown == 2)
 		return S_OK;
 
+	for (int i = 0; i < 8; i++) {
+		if (g_analyzeBitmask & (1 << i)) {
+			checkForSilence(audioFrame, (2 * i), g_audioChannels, g_audioSampleDepth);
+			checkForSilence(audioFrame, (2 * i) + 1, g_audioChannels, g_audioSampleDepth);
+		}
+	}
+
 	if (g_monitorSignalStability) {
 		monitorSignal(videoFrame, audioFrame);
 		return S_OK;
@@ -1729,6 +1811,7 @@ static int usage(const char *progname, int status)
 		"    -ea             Exclude audio from muxed output file.\n"
 		"    -ed             Exclude data (vanc) from muxed output file.\n"
 		"    -X <filename>   Analyze a muxed audio+video+vanc input file.\n"
+		"    -Z <pair# 1-8>  Check for audio silence on the given audio pairs.\n"
 		"    -T <dirname>    Save all vanc messages into dirname as a seperate unique file (16bit words).\n"
 		"\n"
 		"Capture raw video and audio to file then playback. 1920x1080p30, 50 complete frames, PCM audio, 8bit mode:\n"
@@ -1781,6 +1864,11 @@ static int usage(const char *progname, int status)
 		"\t    Make sure you specifiy 16 audio channels and 32bit depth (they're the current defaults):\n"
 		"\t\t -mhp59 -N\n"
 #endif
+		"8) Some SDI output devices drop audio samples if they are internally reset or have internal processing errors.\n"
+		"   Assuming the input signal is a constant tone, we can detect loss by checking for PCM with no credible\n"
+		"   audio waveform on the first two audio pairs, and the fourth pair.\n"
+		"\t\t-i0 -mhp59 -c16 -s32 -Z1 -Z2 -Z4\n"
+
 	);
 
 	exit(status);
@@ -1834,7 +1922,7 @@ static int _main(int argc, char *argv[])
 
 
 	int v;
-	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MNSx:X:R:e:T:")) != -1) {
+	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MNSx:X:R:e:T:Z:")) != -1) {
 		switch (ch) {
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 		case 'S':
@@ -1971,6 +2059,14 @@ static int _main(int argc, char *argv[])
 			break;
 		case 'T':
 			g_vancOutputDir = strdup(optarg);
+			break;
+		case 'Z':
+			v = atoi(optarg);
+			if (v < 1 || v > 8) {
+				fprintf(stderr, "Invalid argument for Z '%s': Valid values 1-8\n", optarg);
+				goto bail;
+			}
+			g_analyzeBitmask |= (1 << (v - 1));
 			break;
 		case '?':
 		case 'h':
