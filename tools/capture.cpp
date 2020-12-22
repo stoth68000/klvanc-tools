@@ -290,6 +290,7 @@ void checkForSilence(IDeckLinkAudioInputPacket* audioFrame, int channelNr, int a
 		time_t now;
 		time(&now);
 		printf("\n\nSilence detected on channel %d (count #%d) @ %s\n", channelNr, silence, ctime(&now));
+		fflush(stdout); /* When console is redirected to logs, we want output in logs immediately. */
 		if (channelNr == 0) {
 			//genericDumpAudioPayload(audioFrame, audioChannelCount, audioSampleDepth);
 		}
