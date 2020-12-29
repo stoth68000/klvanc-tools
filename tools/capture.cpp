@@ -21,6 +21,9 @@
 #include "frame-writer.h"
 #include "rcwt.h"
 
+#include "hires-av-debug.h"
+#include "blackmagic-utils.h"
+
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 #include <libklmonitoring/klmonitoring.h>
 #endif
@@ -181,6 +184,9 @@ static BMDDisplayMode g_requested_mode_id = 0;
 static BMDVideoInputFlags g_inputFlags = bmdVideoInputEnableFormatDetection;
 static BMDPixelFormat g_pixelFormat = bmdFormat10BitYUV;
 struct fwr_header_timing_s ftfirst, ftlast;
+
+static int g_hires_av_debug = 0;
+static struct hires_av_ctx_s g_havctx;
 
 static unsigned int g_analyzeBitmask = 0;
 
@@ -615,6 +621,9 @@ static void signal_handler(int signum)
 		ltn_histogram_interval_print(STDOUT_FILENO, hist_arrival_interval_audio, 0);
 		ltn_histogram_interval_print(STDOUT_FILENO, hist_audio_sfc, 0);
 		ltn_histogram_interval_print(STDOUT_FILENO, hist_format_change, 0);
+
+		hires_av_summary(&g_havctx, 0); /* Write stats to console */
+
 	} else
 	if (signum == SIGUSR2) {
 		printf("Stats manually reset via SIGUSR2\n");
@@ -1244,6 +1253,17 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 
 	// Handle Video Frame
 	if (videoFrame) {
+
+		if (g_hires_av_debug) {
+			/* Queue a video frame statistcally and dequeue it - because we don't transmit frames.
+			 * We're measuring receive stats only.
+			 */
+			hires_av_rx(&g_havctx, HIRES_AV_STREAM_VIDEO, 1);
+			hires_av_tx(&g_havctx, HIRES_AV_STREAM_VIDEO, 1);
+
+			hires_av_summary_per_second(&g_havctx, 0);
+		}
+
 		frameTime = &frameTimes[0];
 
 		static int didDrop = 0;
@@ -1400,6 +1420,15 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 
 	// Handle Audio Frame
 	if (audioFrame) {
+		if (g_hires_av_debug) {
+			/* Queue N audio samples statistcally and dequeue it - because we don't transmit audio.
+			 * We're measuring receive stats only.
+			 */
+			int depth = audioFrame->GetSampleFrameCount();
+			hires_av_rx(&g_havctx, HIRES_AV_STREAM_AP1, depth);
+			hires_av_tx(&g_havctx, HIRES_AV_STREAM_AP1, depth);
+		}
+
 		audioFrameCount++;
 		frameTime = &frameTimes[1];
 
@@ -1814,6 +1843,8 @@ static int usage(const char *progname, int status)
 		"    -X <filename>   Analyze a muxed audio+video+vanc input file.\n"
 		"    -Z <pair# 1-8>  Check for audio silence on the given audio pairs.\n"
 		"    -T <dirname>    Save all vanc messages into dirname as a seperate unique file (16bit words).\n"
+		"    -H              Monitor frame arrival intervals, attempt to measure SDI inputs that run less than realtime\n"
+		"                    Make sure you specify -m and force the video mode when using this feature\n"
 		"\n"
 		"Capture raw video and audio to file then playback. 1920x1080p30, 50 complete frames, PCM audio, 8bit mode:\n"
 		"    %s -mHp30 -n 50 -f video.raw -a audio.raw -p0\n"
@@ -1923,7 +1954,7 @@ static int _main(int argc, char *argv[])
 
 
 	int v;
-	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:I:i:l:LP:MNSx:X:R:e:T:Z:")) != -1) {
+	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:HI:i:l:LP:MNSx:X:R:e:T:Z:")) != -1) {
 		switch (ch) {
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 		case 'S':
@@ -1984,6 +2015,9 @@ static int _main(int argc, char *argv[])
 		case 'A':
 			g_enable_smpte337_detector = 1;
 			g_audioInputFilename = optarg;
+			break;
+		case 'H':
+			g_hires_av_debug = 1;
 			break;
 		case 'I':
 			g_vancInputFilename = optarg;
@@ -2206,6 +2240,15 @@ static int _main(int argc, char *argv[])
 	if (result != S_OK) {
 		fprintf(stderr, "Failed to enable audio input. Is another application using the card?\n");
 		goto bail;
+	}
+
+	if (g_hires_av_debug) {
+		const struct blackmagic_format_s *fmt = blackmagic_getFormatByMode(selectedDisplayMode);
+		if (fmt == 0) {
+			fprintf(stderr, "Unable to find blackmagic format, aborting.\n");
+			goto bail;
+		}
+		hires_av_init(&g_havctx, fmt->timebase_den, fmt->timebase_num, 48000.0);
 	}
 
 	result = deckLinkInput->StartStreams();

@@ -29,6 +29,7 @@ SRC += smpte337_detector.c
 SRC += rcwt.c
 SRC += nielsen.cpp
 SRC += Config.cpp db.cpp transmitter.cpp
+SRC += blackmagic-utils.cpp
 
 #bin_PROGRAMS  = klvanc_util
 bin_PROGRAMS  = klvanc_capture klvanc_transmitter
@@ -42,3 +43,4 @@ libklvanc_noinst_includedir = $(includedir)
 noinst_HEADERS  = hexdump.h
 noinst_HEADERS += version.h
 noinst_HEADERS += nielsen.h
+noinst_HEADERS += blackmagic-utils.h
