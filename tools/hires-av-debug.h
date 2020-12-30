@@ -1,6 +1,17 @@
+/*
+ * MAKE SURE ANY CHANGES IN YOUR DOWNSTREAM PROJECT MAKE IT BACK INTO THIS TIP.
+ *
+ * The 'upstream' version of this file lives in the klvanc-tools project.
+ * This header is copied into multiple projects for various monitoring needs.
+ * Video timing appears to be good.
+ * Audio stuff has never been tested.
+ *
+ */
 
 #ifndef HIRES_AV_DEBUG_H
 #define HIRES_AV_DEBUG_H
+
+#include <sys/time.h>
 
 /* Goal is to keep this as a single header, hghly portable, so that it can be ingested
  * into video applications quickly, to measure audio and video frame arrival times,
