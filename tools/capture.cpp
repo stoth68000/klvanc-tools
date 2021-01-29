@@ -22,6 +22,7 @@
 #include "rcwt.h"
 
 #include "hires-av-debug.h"
+#include "kl-lineartrend.h"
 #include "blackmagic-utils.h"
 
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
@@ -187,6 +188,7 @@ struct fwr_header_timing_s ftfirst, ftlast;
 
 static int g_hires_av_debug = 0;
 static struct hires_av_ctx_s g_havctx;
+static struct kllineartrend_context_s *g_trendctx;
 
 static unsigned int g_analyzeBitmask = 0;
 
@@ -1255,13 +1257,38 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 	if (videoFrame) {
 
 		if (g_hires_av_debug) {
-			/* Queue a video frame statistcally and dequeue it - because we don't transmit frames.
+			/* Queue a video frame statistically and dequeue it - because we don't transmit frames.
 			 * We're measuring receive stats only.
 			 */
 			hires_av_rx(&g_havctx, HIRES_AV_STREAM_VIDEO, 1);
 			hires_av_tx(&g_havctx, HIRES_AV_STREAM_VIDEO, 1);
 
 			hires_av_summary_per_second(&g_havctx, 0);
+
+			time_t now;
+			time(&now);
+
+			/* Once per minute, show the trend calculations for any drift between measured frame
+			 * counts vs actual frames received.
+			 */
+			static time_t lastDeficit = 0;
+			if (now >= (lastDeficit + 60)) {
+				lastDeficit = now;
+
+				static double counter = 0;
+				counter++;
+				if (counter > 1) {
+					printf("Updating trend with %f\n", g_havctx.stream[HIRES_AV_STREAM_VIDEO].expected_actual_deficit_ms);
+					kllineartrend_add(g_trendctx, counter, g_havctx.stream[HIRES_AV_STREAM_VIDEO].expected_actual_deficit_ms);
+
+					kllineartrend_printf(g_trendctx);
+
+					double slope, intersect, deviation;
+					kllineartrend_calculate(g_trendctx, &slope, &intersect, &deviation);
+					printf(" *******************                           Slope %15.5f Deviation is %12.2f\n", slope, deviation);
+				}
+			}
+
 		}
 
 		frameTime = &frameTimes[0];
@@ -2018,6 +2045,7 @@ static int _main(int argc, char *argv[])
 			break;
 		case 'H':
 			g_hires_av_debug = 1;
+			g_trendctx = kllineartrend_alloc(60 * 60 * 60, "Video Drift Trend");
 			break;
 		case 'I':
 			g_vancInputFilename = optarg;
