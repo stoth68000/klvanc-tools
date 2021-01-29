@@ -157,6 +157,7 @@ __inline__ void hires_av_summary_unit(struct hires_av_ctx_s *ctx, int fd, int nr
 	time(&now);
 
 	dprintf(fd, "strm#%d: @ %s", nr, ctime(&now));
+#if 0
 	dprintf(fd, "  rx % 12f ", ctx->stream[nr].units_rx);
 	dprintf(fd, "  tx % 12f\n", ctx->stream[nr].units_tx);
 	dprintf(fd, "  first %ld.%.6ld",
@@ -172,6 +173,7 @@ __inline__ void hires_av_summary_unit(struct hires_av_ctx_s *ctx, int fd, int nr
 	dprintf(fd, "  unit_rate_us %f\n", ctx->stream[nr].unit_rate_us);
 	dprintf(fd, "  expected_units_rx % 12f\n", ctx->stream[nr].expected_units_rx);
 	dprintf(fd, "  expected minus rx actual % 12f (frames)\n", ctx->stream[nr].expected_actual_deficit);
+#endif
 	dprintf(fd, "  expected minus rx actual % 12.02f (ms)\n", ctx->stream[nr].expected_actual_deficit_ms);
 }
 
