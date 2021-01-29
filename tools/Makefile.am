@@ -30,6 +30,7 @@ SRC += rcwt.c
 SRC += nielsen.cpp
 SRC += Config.cpp db.cpp transmitter.cpp
 SRC += blackmagic-utils.cpp
+SRC += kl-lineartrend.c
 
 #bin_PROGRAMS  = klvanc_util
 bin_PROGRAMS  = klvanc_capture klvanc_transmitter
@@ -44,3 +45,4 @@ noinst_HEADERS  = hexdump.h
 noinst_HEADERS += version.h
 noinst_HEADERS += nielsen.h
 noinst_HEADERS += blackmagic-utils.h
+noinst_HEADERS += kl-lineartrend.h
