@@ -1956,32 +1956,9 @@ static int _main(int argc, char *argv[])
 	ltn_histogram_alloc_video_defaults(&hist_audio_sfc, "audio sfc");
 	ltn_histogram_alloc_video_defaults(&hist_format_change, "video format change");
 
-#if ENABLE_NIELSEN
-	/* Enable nielsen on pair 1 */
-	for (int i = 0; i < g_audioChannels / 2; i++) {
-		pNielsenParams[i] = new CMonitorSdkParameters();
-		pNielsenParams[i]->SetSampleSize(32);
-		pNielsenParams[i]->SetPackingMode(FourBytesMsbPadding);
-		pNielsenParams[i]->SetSampleRate(48000);
-		if (pNielsenParams[i]->ValidateAllSettings() != 1) {
-			fprintf(stderr, "Error validating nielsen parameters for pair %d, aborting.\n", i);
-			exit(0);
-		}
-
-		pNielsenCallback[i] = new CMonitorSdkCallback(i);
-		pNielsenAPI[i] = new CMonitorApi(pNielsenParams[i], pNielsenCallback[i]);
-		pNielsenAPI[i]->SetIncludeDetailedReport(1);
-		pNielsenAPI[i]->Initialize();
-		if (pNielsenAPI[i]->IsProcessorInitialized() != 1) {
-			fprintf(stderr, "Error initializing nielsen decoder for pair %d, aborting.\n", i);
-			exit(0);
-		}
-	}
-#endif
-
 
 	int v;
-	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:m:n:p:t:vV:HI:i:l:LP:MNSx:X:R:e:T:Z:")) != -1) {
+	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:Bm:n:p:t:vV:HI:i:l:LP:MNSx:X:R:e:T:Z:")) != -1) {
 		switch (ch) {
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 		case 'S':
@@ -2141,6 +2118,30 @@ static int _main(int argc, char *argv[])
 		usage(argv[0], 0);
 		goto bail;
 	}
+
+#if ENABLE_NIELSEN
+	if (g_enable_nielsen) {
+		for (int i = 0; i < g_audioChannels / 2; i++) {
+			pNielsenParams[i] = new CMonitorSdkParameters();
+			pNielsenParams[i]->SetSampleSize(32);
+			pNielsenParams[i]->SetPackingMode(FourBytesMsbPadding);
+			pNielsenParams[i]->SetSampleRate(48000);
+			if (pNielsenParams[i]->ValidateAllSettings() != 1) {
+				fprintf(stderr, "Error validating nielsen parameters for pair %d, aborting.\n", i);
+				exit(0);
+			}
+
+			pNielsenCallback[i] = new CMonitorSdkCallback(i);
+			pNielsenAPI[i] = new CMonitorApi(pNielsenParams[i], pNielsenCallback[i]);
+			pNielsenAPI[i]->SetIncludeDetailedReport(1);
+			pNielsenAPI[i]->Initialize();
+			if (pNielsenAPI[i]->IsProcessorInitialized() != 1) {
+				fprintf(stderr, "Error initializing nielsen decoder for pair %d, aborting.\n", i);
+				exit(0);
+			}
+		}
+	}
+#endif
 
 	if (g_rcwtOutputFilename != NULL) {
 		rcwtOutputFile = open(g_rcwtOutputFilename, O_WRONLY | O_CREAT | O_TRUNC, 0664);
