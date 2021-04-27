@@ -24,6 +24,7 @@
 #include "hires-av-debug.h"
 #include "kl-lineartrend.h"
 #include "blackmagic-utils.h"
+#include "bw-flash-av-offset.h"
 
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 #include <libklmonitoring/klmonitoring.h>
@@ -193,6 +194,10 @@ static struct kllineartrend_context_s *g_trendctx;
 static unsigned int g_analyzeBitmask = 0;
 
 static int g_enable_smpte337_detector = 0;
+
+static struct bw_flash_avoffset_ctx_s g_bw_flash_ctx = { 0 };
+static int g_bw_flash_measurements = 0;
+static int g_bw_flash_initialized = 0;
 
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 static int g_monitor_prbs_audio_mode = 0;
@@ -1206,6 +1211,41 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 	if (g_shutdown == 2)
 		return S_OK;
 
+	/* Measure any a/v offsets specific to a black/white flash pattern, if enabled. */
+	if (videoFrame && audioFrame && g_bw_flash_measurements && g_bw_flash_initialized == 0) {
+
+		int ret = bw_flash_avoffset_initialize(&g_bw_flash_ctx,
+			videoFrame->GetRowBytes(),
+			videoFrame->GetWidth(),
+			videoFrame->GetHeight(),
+			0, 				/* videoInterlaced */
+			g_audioChannels,
+			g_audioChannels * sizeof(uint32_t),
+			0x3				/* Active Channel Bitmask, assume Stereo */ );
+
+		if (ret == 0) {
+			g_bw_flash_initialized = 1;
+			printf("Initialized and counting A/V Flash pattern.\n");
+		}
+
+	}
+	if (videoFrame && g_bw_flash_measurements && g_bw_flash_initialized) {
+		void *frame;
+		videoFrame->GetBytes(&frame);
+		bw_flash_avoffset_write_video_V210(&g_bw_flash_ctx, (const unsigned char *)frame);
+	}
+	if (audioFrame && g_bw_flash_measurements && g_bw_flash_initialized) {
+		void *frame;
+		audioFrame->GetBytes(&frame);
+
+		int complete = 0;
+		bw_flash_avoffset_write_audio_s32(&g_bw_flash_ctx, (const unsigned char *)frame, audioFrame->GetSampleFrameCount(), &complete);
+		if (complete) {
+			bw_flash_avoffset_query_report_to_fd(&g_bw_flash_ctx, STDOUT_FILENO);
+		}
+	}
+	/* End: Measure any a/v offsets specific to a black/white flash pattern, if enabled. */
+
 	for (int i = 0; i < 8; i++) {
 		if (g_analyzeBitmask & (1 << i)) {
 			checkForSilence(audioFrame, (2 * i), g_audioChannels, g_audioSampleDepth);
@@ -1835,6 +1875,7 @@ static int usage(const char *progname, int status)
 		"    -a <filename>   raw audio output filaname\n"
 		"    -A <filename>   Attempt to detect SMPTE337 on the audio file payload, extract payload into pair files,\n"
 		"                    inspect audio buffers at a byte level. Input should be a file created with -a.\n"
+		"    -B              Monitor A/V offsets from a white flash to the pulse tone.\n"
 		"    -V <filename>   raw vanc output filename\n"
 		"    -I <filename>   Interpret and display input VANC filename (See -V)\n"
 		"    -R <filename>   RCWT caption output filename\n"
@@ -2019,6 +2060,9 @@ static int _main(int argc, char *argv[])
 		case 'A':
 			g_enable_smpte337_detector = 1;
 			g_audioInputFilename = optarg;
+			break;
+		case 'B':
+			g_bw_flash_measurements = 1;
 			break;
 		case 'H':
 			g_hires_av_debug = 1;
