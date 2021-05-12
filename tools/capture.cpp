@@ -259,7 +259,6 @@ void genericDumpAudioPayload(IDeckLinkAudioInputPacket* audioFrame, int audioCha
 
 }
 
-static int silenceDetectCount = 0;
 static int sequentialAudioSilence[16] = { 0 };
 static int sequentialAudioSilenceLast[16] = { 0 };
 
@@ -299,7 +298,6 @@ void checkForSilence(IDeckLinkAudioInputPacket* audioFrame, int channelNr, int a
 	}
 
 	if (silence > limit) {
-		silenceDetectCount++;
 		time_t now;
 		time(&now);
 		printf("\n\nSilence detected on channel %d (count #%d) @ %s\n", channelNr, silence, ctime(&now));
