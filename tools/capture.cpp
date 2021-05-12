@@ -259,8 +259,15 @@ void genericDumpAudioPayload(IDeckLinkAudioInputPacket* audioFrame, int audioCha
 
 }
 
-static int sequentialAudioSilence[16] = { 0 };
-static int sequentialAudioSilenceLast[16] = { 0 };
+struct audioSilenceContext_s
+{
+	time_t lastReport;
+	double sequentialAudioSilenceMs;
+
+	int sequentialAudioSilence;
+	int sequentialAudioSilenceLast;
+
+} g_asctx[16];
 
 void checkForSilence(IDeckLinkAudioInputPacket* audioFrame, int channelNr, int audioChannelCount, int audioSampleDepth)
 {
@@ -269,6 +276,19 @@ void checkForSilence(IDeckLinkAudioInputPacket* audioFrame, int channelNr, int a
 
 	if (!audioFrame)
 		return;
+
+	struct audioSilenceContext_s *asctx = &g_asctx[channelNr];
+
+	time_t now;
+	time(&now);
+	if (now != asctx->lastReport && asctx->sequentialAudioSilenceMs > 0) {
+		printf("channel %d: %7.2fms of silent audio @ %s",
+			channelNr,
+			asctx->sequentialAudioSilenceMs,
+			ctime(&asctx->lastReport));
+		asctx->lastReport = now;
+		asctx->sequentialAudioSilenceMs = 0;
+	}
 
 	uint8_t *data = NULL;
 	audioFrame->GetBytes((void **)&data);
@@ -288,9 +308,9 @@ void checkForSilence(IDeckLinkAudioInputPacket* audioFrame, int channelNr, int a
 		if (dw == 0) {
 			//printf("silence at %d last %d\n", s, lastSilenceIdx);
 			silence++;
-			sequentialAudioSilence[channelNr]++;
+			asctx->sequentialAudioSilence++;
 		} else {
-			sequentialAudioSilence[channelNr] = 0;
+			asctx->sequentialAudioSilence = 0;
 		}
 		//printf("%08x\n", dw);
 
@@ -300,7 +320,12 @@ void checkForSilence(IDeckLinkAudioInputPacket* audioFrame, int channelNr, int a
 	if (silence > limit) {
 		time_t now;
 		time(&now);
-		printf("\n\nSilence detected on channel %d (count #%d) @ %s\n", channelNr, silence, ctime(&now));
+		double lostMS = (double)silence / 48.0;
+		asctx->sequentialAudioSilenceMs += lostMS;
+		printf("\tSilence detected on channel %d, lost %5.02fms (or #%5d samples) @ %s",
+			channelNr,
+			lostMS,
+			silence, ctime(&now));
 		fflush(stdout); /* When console is redirected to logs, we want output in logs immediately. */
 		if (channelNr == 0) {
 			//genericDumpAudioPayload(audioFrame, audioChannelCount, audioSampleDepth);
@@ -1994,7 +2019,7 @@ static int _main(int argc, char *argv[])
 	ltn_histogram_alloc_video_defaults(&hist_arrival_interval_audio, "audio arrival intervals");
 	ltn_histogram_alloc_video_defaults(&hist_audio_sfc, "audio sfc");
 	ltn_histogram_alloc_video_defaults(&hist_format_change, "video format change");
-
+	memset(&g_asctx, 0, sizeof(g_asctx));
 
 	int v;
 	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:Bm:n:p:t:vV:HI:i:l:LP:MNSx:X:R:e:T:Z:")) != -1) {
