@@ -13,7 +13,7 @@
 
 #include <sys/time.h>
 
-/* Goal is to keep this as a single header, hghly portable, so that it can be ingested
+/* Goal is to keep this as a single header, highly portable, so that it can be ingested
  * into video applications quickly, to measure audio and video frame arrival times,
  * vs expected arrival times.
  *
