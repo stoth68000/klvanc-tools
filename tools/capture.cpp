@@ -1319,7 +1319,20 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 	// Handle Video Frame
 	if (videoFrame) {
 
-		if (g_hires_av_debug) {
+		frameTime = &frameTimes[0];
+
+		if (g_hires_av_debug && frameTime->frameCount >= 600) {
+			/* After 600 frames, start measturing statistics */
+
+			if (frameTime->frameCount == 600) {
+				const struct blackmagic_format_s *fmt = blackmagic_getFormatByMode(selectedDisplayMode);
+				if (fmt == 0) {
+					fprintf(stderr, "Unable to find blackmagic format, aborting.\n");
+					exit(1);
+				}
+				hires_av_init(&g_havctx, fmt->timebase_den, fmt->timebase_num, 48000.0);
+			}
+
 			/* Queue a video frame statistically and dequeue it - because we don't transmit frames.
 			 * We're measuring receive stats only.
 			 */
@@ -1353,8 +1366,6 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 			}
 
 		}
-
-		frameTime = &frameTimes[0];
 
 		static int didDrop = 0;
 		unsigned long long t = msecsX10();
@@ -2336,15 +2347,6 @@ static int _main(int argc, char *argv[])
 	if (result != S_OK) {
 		fprintf(stderr, "Failed to enable audio input. Is another application using the card?\n");
 		goto bail;
-	}
-
-	if (g_hires_av_debug) {
-		const struct blackmagic_format_s *fmt = blackmagic_getFormatByMode(selectedDisplayMode);
-		if (fmt == 0) {
-			fprintf(stderr, "Unable to find blackmagic format, aborting.\n");
-			goto bail;
-		}
-		hires_av_init(&g_havctx, fmt->timebase_den, fmt->timebase_num, 48000.0);
 	}
 
 	result = deckLinkInput->StartStreams();
