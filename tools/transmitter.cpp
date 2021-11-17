@@ -151,7 +151,7 @@ struct vancmenus_context_s {
 
 void generate_vanc_msg(struct vancmenus_context_s *ctx, const struct ltn_db_entry_s *e)
 {
-	unsigned char buf[512] = { 0 };
+	unsigned char buf[2048] = { 0 };
 
 	write_vanc_msg(&buf[0], &e->payload[0], e->payloadWords);
 	//hexdump(&buf[0], sizeof(buf));
