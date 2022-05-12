@@ -23,6 +23,7 @@ TARGET_DIR=~/rpmbuild/BUILDROOT/$APP-$GIT_VERSION-1.x86_64
 mkdir -p $TARGET_DIR/usr/local/bin
 cp ../tools/klvanc_capture $TARGET_DIR/usr/local/bin
 cp ../tools/klvanc_transmitter $TARGET_DIR/usr/local/bin
+cp ../libklvanc/tools/klvanc_smpte2038 $TARGET_DIR/usr/local/bin
 
 #mkdir -p $TARGET_DIR/usr/local/share/man/man8
 #cp ../man/*.8 $TARGET_DIR/usr/local/share/man/man8
