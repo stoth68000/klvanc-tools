@@ -31,6 +31,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include "Config.h"
+#include "decklink_portability.h"
 
 BMDConfig::BMDConfig() :
 	m_vancCfgName(NULL),
@@ -151,7 +152,10 @@ bool BMDConfig::ParseArguments(int argc,  char** argv)
 		IDeckLinkDisplayMode *displayMode = GetDeckLinkDisplayMode(deckLink, m_displayModeIndex);
 		if (displayMode != NULL)
 		{
-			displayMode->GetName((const char**)&m_displayModeName);
+			DECKLINK_STR displayModeNameTmp = NULL;
+			displayMode->GetName(&displayModeNameTmp);
+			m_displayModeName = DECKLINK_STRDUP(displayModeNameTmp);
+			DECKLINK_FREE(displayModeNameTmp);
 			displayMode->Release();
 		}
 		else
@@ -159,7 +163,10 @@ bool BMDConfig::ParseArguments(int argc,  char** argv)
 			m_displayModeName = strdup("Invalid");
 		}
 
-		deckLink->GetModelName((const char**)&m_deckLinkName);
+		DECKLINK_STR ModelTmp = NULL;
+		deckLink->GetModelName(&ModelTmp);
+		m_deckLinkName = DECKLINK_STRDUP(ModelTmp);
+		DECKLINK_FREE(ModelTmp);
 		deckLink->Release();
 	}
 	else
@@ -259,9 +266,12 @@ void BMDConfig::DisplayUsage(int status)
 	while (deckLinkIterator->Next(&deckLink) == S_OK)
 	{
 		char *deckLinkName;
-		result = deckLink->GetModelName((const char**)&deckLinkName);
+		DECKLINK_STR NameStringTmp = NULL;
+		result = deckLink->GetModelName(&NameStringTmp);
 		if (result == S_OK)
 		{
+			deckLinkName = DECKLINK_STRDUP(NameStringTmp);
+			DECKLINK_FREE(NameStringTmp);
 			fprintf(stderr,
 				"        %2d: %s%s\n",
 				deckLinkCount,
@@ -285,9 +295,12 @@ void BMDConfig::DisplayUsage(int status)
 
 	deckLinkName = NULL;
 
-	if (deckLinkSelected != NULL)
-		deckLinkSelected->GetModelName((const char**)&deckLinkName);
-
+	if (deckLinkSelected != NULL) {
+		DECKLINK_STR NameStringTmp = NULL;
+		result = deckLink->GetModelName(&NameStringTmp);
+		deckLinkName = DECKLINK_STRDUP(NameStringTmp);
+		DECKLINK_FREE(NameStringTmp);
+	}
 	fprintf(stderr,
 		"    -m <mode id>: (%s)\n",
 		deckLinkName ? deckLinkName : ""
@@ -313,12 +326,15 @@ void BMDConfig::DisplayUsage(int status)
 
 	while (displayModeIterator->Next(&displayMode) == S_OK)
 	{
-		result = displayMode->GetName((const char **)&displayModeName);
+		DECKLINK_STR displayModeNameTmp = NULL;
+		result = displayMode->GetName(&displayModeNameTmp);
 		if (result == S_OK)
 		{
 			BMDTimeValue frameRateDuration;
 			BMDTimeValue frameRateScale;
 
+			displayModeName = DECKLINK_STRDUP(displayModeNameTmp);
+			DECKLINK_FREE(displayModeNameTmp);
 			displayMode->GetFrameRate(&frameRateDuration, &frameRateScale);
 
 			fprintf(stderr,

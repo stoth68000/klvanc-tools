@@ -43,6 +43,7 @@
 
 #include "transmitter.h"
 #include "db.h"
+#include "decklink_portability.h"
 
 pthread_mutex_t			sleepMutex;
 pthread_cond_t			sleepCond;
@@ -344,6 +345,7 @@ bool TestPattern::Run()
 
 	IDeckLinkIterator*				deckLinkIterator = NULL;
 	IDeckLinkDisplayModeIterator*	displayModeIterator = NULL;
+	DECKLINK_STR displayModeNameTmp = NULL;
 
 	// Get the DeckLink device
 	deckLinkIterator = CreateDeckLinkIteratorInstance();
@@ -397,11 +399,14 @@ bool TestPattern::Run()
 	}
 
 	// Get display mode name
-	result = m_displayMode->GetName((const char**)&m_displayModeName);
+	result = m_displayMode->GetName(&displayModeNameTmp);
 	if (result != S_OK)
 	{
 		m_displayModeName = (char *)malloc(32);
 		snprintf(m_displayModeName, 32, "[index %d]", m_config->m_displayModeIndex);
+	} else {
+		m_displayModeName = DECKLINK_STRDUP(displayModeNameTmp);
+		DECKLINK_FREE(displayModeNameTmp);
 	}
 
 fprintf(stderr, "Using display mode %s\n", m_displayModeName);
