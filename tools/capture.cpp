@@ -1972,6 +1972,8 @@ static int usage(const char *progname, int status)
 		"   Assuming the input signal is a constant tone, we can detect loss by checking for PCM with no credible\n"
 		"   audio waveform on the first two audio pairs, and the fourth pair.\n"
 		"\t\t-i0 -mhp59 -c16 -s32 -Z1 -Z2 -Z4\n"
+		"9) Decode SCTE104 from 1080p59.94, input 3, messages to console (super chatty with other messages too).\n"
+		"\t\t-i3 -mHp59 -v\n"
 
 	);
 
