@@ -47,9 +47,10 @@ public:
 	bool ParseArguments(int argc,  char** argv);
 	void DisplayUsage(int status);
 	void DisplayConfiguration();
+	IDeckLinkDisplayMode* GetDeckLinkDisplayMode(IDeckLink* deckLink, BMDDisplayMode mode);
 
 	int						m_deckLinkIndex;
-	int						m_displayModeIndex;
+	BMDDisplayMode					m_displayMode;
 
 	int						m_audioChannels;
 	int						m_audioSampleDepth;
@@ -73,7 +74,6 @@ private:
 	static const char* GetPixelFormatName(BMDPixelFormat pixelFormat);
 
 	IDeckLink* GetDeckLink(int idx);
-	IDeckLinkDisplayMode* GetDeckLinkDisplayMode(IDeckLink* deckLink, int idx);
 };
 
 #endif

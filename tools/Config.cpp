@@ -38,7 +38,7 @@ BMDConfig::BMDConfig() :
 	m_outputVideoPattern(kOutputSignalPipBars),
 	m_interactiveVANCMenus(false),
 	m_deckLinkIndex(-1),
-	m_displayModeIndex(-1),
+	m_displayMode(bmdModeNTSC),
 	m_audioChannels(2),
 	m_audioSampleDepth(16),
 	m_outputFlags(bmdVideoOutputFlagDefault | bmdVideoOutputVANC),
@@ -71,7 +71,10 @@ bool BMDConfig::ParseArguments(int argc,  char** argv)
 				break;
 
 			case 'm':
-				m_displayModeIndex = atoi(optarg);
+				m_displayMode  = *(optarg + 0) << 24;
+				m_displayMode |= *(optarg + 1) << 16;
+				m_displayMode |= *(optarg + 2) <<  8;
+				m_displayMode |= *(optarg + 3);
 				break;
 
 			case 'c':
@@ -136,12 +139,6 @@ bool BMDConfig::ParseArguments(int argc,  char** argv)
 		DisplayUsage(1);
 	}
 
-	if (m_displayModeIndex < 0)
-	{
-		fprintf(stderr, "You must select a display mode\n");
-		DisplayUsage(1);
-	}
-
 	if (displayHelp)
 		DisplayUsage(0);
 
@@ -149,7 +146,7 @@ bool BMDConfig::ParseArguments(int argc,  char** argv)
 	IDeckLink *deckLink = GetDeckLink(m_deckLinkIndex);
 	if (deckLink != NULL)
 	{
-		IDeckLinkDisplayMode *displayMode = GetDeckLinkDisplayMode(deckLink, m_displayModeIndex);
+		IDeckLinkDisplayMode *displayMode = GetDeckLinkDisplayMode(deckLink, m_displayMode);
 		if (displayMode != NULL)
 		{
 			DECKLINK_STR displayModeNameTmp = NULL;
@@ -201,13 +198,12 @@ IDeckLink* BMDConfig::GetDeckLink(int idx)
 	return deckLink;
 }
 
-IDeckLinkDisplayMode* BMDConfig::GetDeckLinkDisplayMode(IDeckLink* deckLink, int idx)
+IDeckLinkDisplayMode* BMDConfig::GetDeckLinkDisplayMode(IDeckLink* deckLink, BMDDisplayMode mode)
 {
 	HRESULT							result;
 	IDeckLinkDisplayMode*			displayMode = NULL;
 	IDeckLinkOutput*				deckLinkOutput = NULL;
 	IDeckLinkDisplayModeIterator*	displayModeIterator = NULL;
-	int								i = idx;
 
 	result = deckLink->QueryInterface(IID_IDeckLinkOutput, (void**)&deckLinkOutput);
 	if (result != S_OK)
@@ -219,9 +215,8 @@ IDeckLinkDisplayMode* BMDConfig::GetDeckLinkDisplayMode(IDeckLink* deckLink, int
 
 	while ((result = displayModeIterator->Next(&displayMode)) == S_OK)
 	{
-		if (i == 0)
+		if (displayMode->GetDisplayMode() == mode)
 			break;
-		--i;
 
 		displayMode->Release();
 	}
@@ -253,11 +248,10 @@ void BMDConfig::DisplayUsage(int status)
 	IDeckLinkOutput*				deckLinkOutput = NULL;
 
 	IDeckLinkDisplayMode*			displayMode;
-	int								displayModeCount = 0;
 	char*							displayModeName;
 
 	fprintf(stderr,
-		"Usage: TestPattern -d <device id> -m <mode id> [OPTIONS]\n"
+		"Usage: TestPattern -d <device id> -m <mode> [OPTIONS]\n"
 		"\n"
 		"    -d <device id>:\n"
 	);
@@ -302,7 +296,7 @@ void BMDConfig::DisplayUsage(int status)
 		DECKLINK_FREE(NameStringTmp);
 	}
 	fprintf(stderr,
-		"    -m <mode id>: (%s)\n",
+		"    -m <mode>: (%s)\n",
 		deckLinkName ? deckLinkName : ""
 	);
 
@@ -338,8 +332,11 @@ void BMDConfig::DisplayUsage(int status)
 			displayMode->GetFrameRate(&frameRateDuration, &frameRateScale);
 
 			fprintf(stderr,
-				"        %2d:  %-20s \t %li x %li \t %g FPS\n",
-				displayModeCount,
+				"        %c%c%c%c:  %-20s \t %li x %li \t %g FPS\n",
+				displayMode->GetDisplayMode() >> 24,
+                                displayMode->GetDisplayMode() >> 16,
+                                displayMode->GetDisplayMode() >>  8,
+                                displayMode->GetDisplayMode(),
 				displayModeName,
 				displayMode->GetWidth(),
 				displayMode->GetHeight(),
@@ -350,7 +347,6 @@ void BMDConfig::DisplayUsage(int status)
 		}
 
 		displayMode->Release();
-		++displayModeCount;
 	}
 
 bail:
@@ -370,7 +366,7 @@ bail:
 		"\n"
 		"Output a test pattern and start the interactive VANC transmitter UI:\n"
 		"\n"
-		"   klvanc_transmitter -d0 -m2 -M ../vanc-packets/klvanc_transmitter.cfg\n"
+		"   klvanc_transmitter -d0 -m hp59 -M ../vanc-packets/klvanc_transmitter.cfg\n"
 	);
 
 	if (deckLinkIterator != NULL)

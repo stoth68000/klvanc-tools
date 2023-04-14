@@ -351,7 +351,6 @@ bool TestPattern::Run()
 	bool							success = false;
 
 	IDeckLinkIterator*				deckLinkIterator = NULL;
-	IDeckLinkDisplayModeIterator*	displayModeIterator = NULL;
 	DECKLINK_STR displayModeNameTmp = NULL;
 
 	// Get the DeckLink device
@@ -384,24 +383,10 @@ bool TestPattern::Run()
 		goto bail;
 
 	// Get the display mode
-	idx = m_config->m_displayModeIndex;
-
-	result = m_deckLinkOutput->GetDisplayModeIterator(&displayModeIterator);
-	if (result != S_OK)
-		goto bail;
-
-	while ((result = displayModeIterator->Next(&m_displayMode)) == S_OK)
+	m_displayMode = m_config->GetDeckLinkDisplayMode(m_deckLink, m_config->m_displayMode);
+	if (m_displayMode == NULL)
 	{
-		if (idx == 0)
-			break;
-		--idx;
-
-		m_displayMode->Release();
-	}
-
-	if (result != S_OK || m_displayMode == NULL)
-	{
-		fprintf(stderr, "Unable to get display mode %d\n", m_config->m_displayModeIndex);
+		fprintf(stderr, "Unable to get display mode %x\n", m_config->m_displayMode);
 		goto bail;
 	}
 
@@ -410,7 +395,7 @@ bool TestPattern::Run()
 	if (result != S_OK)
 	{
 		m_displayModeName = (char *)malloc(32);
-		snprintf(m_displayModeName, 32, "[index %d]", m_config->m_displayModeIndex);
+		snprintf(m_displayModeName, 32, "[%x]", m_config->m_displayMode);
 	} else {
 		m_displayModeName = DECKLINK_STRDUP(displayModeNameTmp);
 		DECKLINK_FREE(displayModeNameTmp);
@@ -449,9 +434,6 @@ bail:
 
 	if (m_displayMode != NULL)
 		m_displayMode->Release();
-
-	if (displayModeIterator != NULL)
-		displayModeIterator->Release();
 
 	if (m_deckLinkOutput != NULL)
 		m_deckLinkOutput->Release();
