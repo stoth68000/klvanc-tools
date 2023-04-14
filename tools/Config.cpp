@@ -34,15 +34,15 @@
 #include "decklink_portability.h"
 
 BMDConfig::BMDConfig() :
-	m_vancCfgName(NULL),
-	m_outputVideoPattern(kOutputSignalPipBars),
-	m_interactiveVANCMenus(false),
 	m_deckLinkIndex(-1),
 	m_displayMode(bmdModeNTSC),
 	m_audioChannels(2),
 	m_audioSampleDepth(16),
 	m_outputFlags(bmdVideoOutputFlagDefault | bmdVideoOutputVANC),
 	m_pixelFormat(bmdFormat10BitYUV),
+	m_vancCfgName(NULL),
+	m_outputVideoPattern(kOutputSignalPipBars),
+	m_interactiveVANCMenus(false),
 	m_deckLinkName(),
 	m_displayModeName()
 {

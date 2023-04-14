@@ -329,7 +329,6 @@ TestPattern::~TestPattern()
 
 TestPattern::TestPattern(BMDConfig *config) :
 	m_refCount(1),
-	m_msg_data_length(0),
 	m_config(config),
 	m_running(false),
 	m_deckLink(),
@@ -338,7 +337,8 @@ TestPattern::TestPattern(BMDConfig *config) :
 	m_videoFrameBlack(),
 	m_videoFrameBars(),
 	m_audioBuffer(),
-	m_audioSampleRate(bmdAudioSampleRate48kHz)
+	m_audioSampleRate(bmdAudioSampleRate48kHz),
+	m_msg_data_length(0)
 {
 	pthread_mutex_init(&m_msg_mutex, NULL);
 	m_displayModeName = NULL;
