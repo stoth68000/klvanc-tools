@@ -297,7 +297,7 @@ void BMDConfig::DisplayUsage(int status)
 
 	if (deckLinkSelected != NULL) {
 		DECKLINK_STR NameStringTmp = NULL;
-		result = deckLink->GetModelName(&NameStringTmp);
+		result = deckLinkSelected->GetModelName(&NameStringTmp);
 		deckLinkName = DECKLINK_STRDUP(NameStringTmp);
 		DECKLINK_FREE(NameStringTmp);
 	}
