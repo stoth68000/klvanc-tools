@@ -4,7 +4,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <curses.h>
 #include <inttypes.h>
 
 struct ltn_db_entry_s {

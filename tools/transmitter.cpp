@@ -38,7 +38,9 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <arpa/inet.h>
+#if HAVE_CURSES_H
 #include <curses.h>
+#endif
 #include <inttypes.h>
 
 #include "transmitter.h"
@@ -168,6 +170,7 @@ void generate_msg__type_a(struct vancmenus_context_s *ctx, int value)
 	g_vancmenus_sentMessageCount++;
 }
 
+#if HAVE_CURSES_H
 static void vancmenus_draw(struct vancmenus_context_s *ctx)
 {
 	int linenr = 0;
@@ -264,6 +267,7 @@ static void *vancmenus_thread_func(void *p)
 
 	return NULL;
 }
+#endif
 
 static int _main(int argc, char *argv[])
 {
@@ -286,7 +290,7 @@ static int _main(int argc, char *argv[])
 	}
 
 	generator = new TestPattern(&config);
-
+#if HAVE_CURSES_H
 	if (config.m_interactiveVANCMenus) {
 		ltn_db_load(config.m_vancCfgName);
 
@@ -295,14 +299,17 @@ static int _main(int argc, char *argv[])
 		vancmenus_ctx.config = &config;
 		pthread_create(&vancmenus_threadId, 0, vancmenus_thread_func, &vancmenus_ctx);
 	}
+#endif
 
 	if (!generator->Run())
 		goto bail;
 
+#if HAVE_CURSES_H
 	if (config.m_interactiveVANCMenus) {
 		vancmenus_ctx.running = 1;
 		usleep(150 * 1000);
 	}
+#endif
 
 	// All Okay.
 	exitStatus = 0;
