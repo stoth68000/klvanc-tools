@@ -56,7 +56,6 @@ const unsigned long		kAudioWaterlevel = 48000;
 pthread_t vancmenus_threadId;
 static int g_vancmenus_sentMessageCount = 0;
 
-static int dbcount = 0;
 struct db_entry_s {
 	char key;
 	char title;
@@ -178,9 +177,9 @@ static void vancmenus_draw(struct vancmenus_context_s *ctx)
 	clear();
 
 	char line_a[160], line_b[160], line_c[160];
-	sprintf(line_a, "VANC Transmitter Menus");
-	sprintf(line_b, "");
-	sprintf(line_c, "Frames: %" PRIi64 " Sent: %d (%s)", ctx->generator->getScheduledFrameCount(),
+	snprintf(line_a, sizeof(line_a), "VANC Transmitter Menus");
+	snprintf(line_b, sizeof(line_b), "%s", "");
+	snprintf(line_c, sizeof(line_c), "Frames: %" PRIi64 " Sent: %d (%s)", ctx->generator->getScheduledFrameCount(),
 		g_vancmenus_sentMessageCount, ctx->generator->m_displayModeName);
 	int blen = 76 - (strlen(line_a) + strlen(line_c));
 	memset(line_b, 0x20, sizeof(line_b));
@@ -213,9 +212,9 @@ static void vancmenus_draw(struct vancmenus_context_s *ctx)
 
 	time_t now;
 	time(&now);
-	sprintf(line_a, "LTN Global Communications, Inc.");
-	sprintf(line_b, "");
-	sprintf(line_c, "%s", ctime(&now));
+	snprintf(line_a, sizeof(line_a), "LTN Global Communications, Inc.");
+	snprintf(line_b, sizeof(line_b), "%s", "");
+	snprintf(line_c, sizeof(line_c), "%s", ctime(&now));
 
 	blen = 77 - (strlen(line_a) + strlen(line_c));
 	memset(line_b, 0x20, sizeof(line_b));
@@ -451,7 +450,6 @@ void TestPattern::StartRunning()
 {
 	HRESULT					result;
 	unsigned long			audioSamplesPerFrame;
-	IDeckLinkVideoFrame*	rightFrame;
 
 	m_frameWidth = m_displayMode->GetWidth();
 	m_frameHeight = m_displayMode->GetHeight();
@@ -843,9 +841,9 @@ void FillColourBars(IDeckLinkMutableVideoFrame* theFrame, bool reverse)
 
 	if (reverse)
 	{
-		for (long y = 0; y < height; y++)
+		for (unsigned long y = 0; y < height; y++)
 		{
-			for (long x = width - 2; x >= 0; x -= 2)
+			for (unsigned long x = width - 2; x >= 0; x -= 2)
 			{
 				*(nextWord++) = bars[(x * 8) / width];
 			}
@@ -853,9 +851,9 @@ void FillColourBars(IDeckLinkMutableVideoFrame* theFrame, bool reverse)
 	}
 	else
 	{
-		for (long y = 0; y < height; y++)
+		for (unsigned long y = 0; y < height; y++)
 		{
-			for (long x = 0; x < width; x += 2)
+			for (unsigned long x = 0; x < width; x += 2)
 			{
 				*(nextWord++) = bars[(x * 8) / width];
 			}
