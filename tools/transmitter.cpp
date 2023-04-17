@@ -46,6 +46,7 @@
 #include "transmitter.h"
 #include "db.h"
 #include "decklink_portability.h"
+#include "v210burn.h"
 
 pthread_mutex_t			sleepMutex;
 pthread_cond_t			sleepCond;
@@ -337,7 +338,9 @@ TestPattern::TestPattern(BMDConfig *config) :
 	m_videoFrameBars(),
 	m_audioBuffer(),
 	m_audioSampleRate(bmdAudioSampleRate48kHz),
-	m_msg_data_length(0)
+	m_msg_data_length(0),
+	m_frame_num(0),
+	m_last_insert(-1)
 {
 	pthread_mutex_init(&m_msg_mutex, NULL);
 	m_displayModeName = NULL;
@@ -566,6 +569,8 @@ void TestPattern::StopRunning()
 
 void TestPattern::ScheduleNextFrame(bool prerolling)
 {
+	char frame_label[64];
+
 	if (prerolling == false)
 	{
 		// If not prerolling, make sure that playback is still active
@@ -616,6 +621,20 @@ void TestPattern::ScheduleNextFrame(bool prerolling)
 	/* Duplicate original frame into new frame */
 	memcpy(dstFramePtr, srcFramePtr, m_frameHeight * (m_frameWidth * bytesPerPixel));
 
+	/* DJH DEBUG */
+	if (m_config->m_pixelFormat == bmdFormat10BitYUV) {
+		snprintf(frame_label, sizeof(frame_label), "Frame: %d", m_frame_num);
+		m_frame_num++;
+		v210_burn(dstFramePtr, m_frameWidth, m_frameHeight, (m_frameWidth * bytesPerPixel),
+			  frame_label, 1, 1);
+		if (m_last_insert != -1) {
+			snprintf(frame_label, sizeof(frame_label), "Last insert: %d", m_last_insert);
+			v210_burn(dstFramePtr, m_frameWidth, m_frameHeight, (m_frameWidth * bytesPerPixel),
+				  frame_label, 1, 2);
+			m_last_insert++;
+		}
+	}
+
 	pthread_mutex_lock(&m_msg_mutex);
 	while (m_msg_data_length > 0) {
 		IDeckLinkVideoFrameAncillary *vanc;
@@ -636,9 +655,16 @@ void TestPattern::ScheduleNextFrame(bool prerolling)
 			break;
 		}
 
+		if (m_config->m_pixelFormat == bmdFormat10BitYUV) {
+			snprintf(frame_label, sizeof(frame_label), "Injecting VANC (line %d)", m_msg_line);
+			v210_burn(dstFramePtr, m_frameWidth, m_frameHeight,  (m_frameWidth * bytesPerPixel),
+				  frame_label, 1, 3);
+		}
+
 		//printf("Sending vanc %d bytes line %d\n", m_msg_data_length, m_msg_line);
 		vanc->Release();
 		m_msg_data_length = 0;
+		m_last_insert = 0;
 	}
 	pthread_mutex_unlock(&m_msg_mutex);
 

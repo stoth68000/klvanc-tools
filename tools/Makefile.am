@@ -28,7 +28,7 @@ SRC += frame-writer.c
 SRC += smpte337_detector.c
 SRC += rcwt.c
 SRC += nielsen.cpp
-SRC += Config.cpp db.cpp transmitter.cpp
+SRC += Config.cpp db.cpp transmitter.cpp v210burn.c
 SRC += blackmagic-utils.cpp
 SRC += kl-lineartrend.c
 
