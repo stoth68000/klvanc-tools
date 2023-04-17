@@ -175,8 +175,8 @@ static struct prbs_context_s g_prbs;
 static int g_prbs_initialized = 0;
 #endif
 
-static int g_enable_nielsen = 0;
 #if ENABLE_NIELSEN
+static int g_enable_nielsen = 0;
 /* We're assuming a max of 8 pairs */
 CMonitorApi *pNielsenAPI[16] = { 0 };
 CMonitorSdkParameters *pNielsenParams[16] = { 0 };
@@ -266,7 +266,7 @@ void checkForSilence(IDeckLinkAudioInputPacket* audioFrame, int channelNr, int a
 	uint32_t *p = (uint32_t *)data;
 	p += channelNr; /* Adjust the offset to the start of the channel we are inspecting */
 	int silence = 0;
-	int lastSilenceIdx = -1;
+	// int lastSilenceIdx = -1;
 
 	/* 720p59.94 default to 24, 1080i default to 48 */
 	int limit = 24;
@@ -717,7 +717,7 @@ static int AnalyzeMuxed(const char *fn)
 			struct timeval diff;
 			fwr_timeval_subtract(&diff, &ft.ts1, &ftlast.ts1);
 
-			printf("timing: counter %" PRIu64 "  mode:%s  ts:%d.%06d  timestamp_interval:%d.%06d\n",
+			printf("timing: counter %" PRIu64 "  mode:%s  ts:%ld.%06ld  timestamp_interval:%ld.%06ld\n",
 				ft.counter,
 				display_mode_to_string(ft.decklinkCaptureMode),
 				ft.ts1.tv_sec,
@@ -817,9 +817,9 @@ static int AnalyzeAudio(const char *fn)
 		printf("id: %8d ch: %d  sfc: %d  depth: %d  stride: %d  bytes: %d\n",
 			frame - 1, f->channelCount, f->frameCount, f->sampleDepth, stride, f->bufferLengthBytes);
 		if (g_verbose) {
-			for (int i = 0; i < f->frameCount; i++) {
+			for (unsigned int i = 0; i < f->frameCount; i++) {
 				printf("   frame: %8d  ", i);
-				for (int j = 0; j < stride; j++) {
+				for (unsigned int j = 0; j < stride; j++) {
 					if (j && (f->sampleDepth == 32) && ((j % 8) == 0))
 						printf(": ");
 					printf("%02x ", *(f->ptr + (i * stride) + j));
@@ -831,15 +831,15 @@ static int AnalyzeAudio(const char *fn)
 		if (g_enable_smpte337_detector) {
 			for (int i = 0; i < 8; i++) {
 				int offset = (i * 2) * (f->sampleDepth / 8);
-				size_t l = smpte337_detector_write(det[i], f->ptr + offset,
-					f->frameCount, f->sampleDepth, f->channelCount, stride, 1);
+				smpte337_detector_write(det[i], f->ptr + offset,
+							f->frameCount, f->sampleDepth, f->channelCount, stride, 1);
 			}
 		}
 
 		/* Dump each L/R pair to a seperate file. */
 		unsigned char *p = f->ptr;
-		for (int i = 0; i < f->frameCount; i++) {
-			for (int j = 0; j < (f->channelCount / 2); j++) {
+		for (unsigned int i = 0; i < f->frameCount; i++) {
+			for (unsigned int j = 0; j < (f->channelCount / 2); j++) {
 				fwrite(p, 2 * (f->sampleDepth / 8), 1, ofh[j]);
 				p += 2 * (f->sampleDepth / 8);
 			}
@@ -1984,9 +1984,7 @@ static int _main(int argc, char *argv[])
 {
 	IDeckLinkIterator *deckLinkIterator = CreateDeckLinkIteratorInstance();
 	DeckLinkCaptureDelegate *delegate;
-	IDeckLinkDisplayMode *displayMode;
 
-	int displayModeCount = 0;
 	int exitStatus = 1;
 	int ch;
 	int portnr = 0;

@@ -154,7 +154,7 @@ static __inline__ void bw_flash_avoffset_query_report_to_fd(struct bw_flash_avof
 	}
 	for (int i = 0; i < 16; i++) {
 		if (counts[i]) {
-			dprintf(fd, "%08d ", counts[i]);
+			dprintf(fd, "%08" PRIu64 " ", counts[i]);
 		} else {
 			dprintf(fd, "%8s ", "");
 		}
