@@ -40,7 +40,7 @@ static int v210_burn_char(unsigned char *frame,
 	uint8_t line;
 	uint8_t bar10_fg[16];
 	uint8_t bar10_bg[16];
-	int plotctrl = 4;
+	int plotctrl = 8;
 	int plotwidth = 4 * plotctrl;
 	int plotheight = 8 * plotctrl;
 
@@ -72,31 +72,33 @@ static int v210_burn_char(unsigned char *frame,
 	for (int i = 0; i < 8; i++) {
 		int k = 0;
 		while (k++ < 4) {
-			line = font8x8_basic[letter][ i ];
-			for (int j = 0; j < 4; j++) {
-				/* Hack which takes advantage of the fact that
-				   both the FG and BG have the same chroma */
-				for (int c=0; c < 2; c++) {
-					if (line & 0x01) {
-						for (int n = 0; n < 8; n++)
-							*(ptr + n) = bar10_fg[n];
-						if (plotctrl == 8) {
+			for (int m = 0; m < (plotctrl / 4); m++) {
+				line = font8x8_basic[letter][ i ];
+				for (int j = 0; j < 4; j++) {
+					/* Hack which takes advantage of the fact that
+					   both the FG and BG have the same chroma */
+					for (int c=0; c < 2; c++) {
+						if (line & 0x01) {
 							for (int n = 0; n < 8; n++)
-								*(ptr + 8 + n) = bar10_fg[n];
-						}
-					} else {
-						for (int n = 0; n < 8; n++)
-							*(ptr + n) = bar10_bg[n];
-						if (plotctrl == 8) {
+								*(ptr + n) = bar10_fg[n];
+							if (plotctrl == 8) {
+								for (int n = 0; n < 8; n++)
+									*(ptr + 8 + n) = bar10_fg[n];
+							}
+						} else {
 							for (int n = 0; n < 8; n++)
-								*(ptr + 8 + n) = bar10_bg[n];
+								*(ptr + n) = bar10_bg[n];
+							if (plotctrl == 8) {
+								for (int n = 0; n < 8; n++)
+									*(ptr + 8 + n) = bar10_bg[n];
+							}
 						}
+						line >>= 1;
+						ptr += plotctrl * 2;
 					}
-					line >>= 1;
-					ptr += plotctrl * 2;
 				}
+				ptr += ((stride) - (plotctrl * 4 * 4));
 			}
-			ptr += ((stride) - (plotctrl * 4 * 4));
 		}
 	}
 	return 0;
