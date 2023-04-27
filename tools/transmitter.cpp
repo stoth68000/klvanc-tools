@@ -621,20 +621,6 @@ void TestPattern::ScheduleNextFrame(bool prerolling)
 	/* Duplicate original frame into new frame */
 	memcpy(dstFramePtr, srcFramePtr, m_frameHeight * (m_frameWidth * bytesPerPixel));
 
-	/* DJH DEBUG */
-	if (m_config->m_pixelFormat == bmdFormat10BitYUV) {
-		snprintf(frame_label, sizeof(frame_label), "Frame: %d", m_frame_num);
-		m_frame_num++;
-		v210_burn(dstFramePtr, m_frameWidth, m_frameHeight, (m_frameWidth * bytesPerPixel),
-			  frame_label, 1, 1);
-		if (m_last_insert != -1) {
-			snprintf(frame_label, sizeof(frame_label), "Last insert: %d", m_last_insert);
-			v210_burn(dstFramePtr, m_frameWidth, m_frameHeight, (m_frameWidth * bytesPerPixel),
-				  frame_label, 1, 2);
-			m_last_insert++;
-		}
-	}
-
 	pthread_mutex_lock(&m_msg_mutex);
 	while (m_msg_data_length > 0) {
 		IDeckLinkVideoFrameAncillary *vanc;
@@ -667,6 +653,20 @@ void TestPattern::ScheduleNextFrame(bool prerolling)
 		m_last_insert = 0;
 	}
 	pthread_mutex_unlock(&m_msg_mutex);
+
+        /* Burn frame counters into the video */
+	if (m_config->m_pixelFormat == bmdFormat10BitYUV) {
+		snprintf(frame_label, sizeof(frame_label), "Frame: %d", m_frame_num);
+		m_frame_num++;
+		v210_burn(dstFramePtr, m_frameWidth, m_frameHeight, (m_frameWidth * bytesPerPixel),
+			  frame_label, 1, 1);
+		if (m_last_insert != -1) {
+			snprintf(frame_label, sizeof(frame_label), "Last insert: %d", m_last_insert);
+			v210_burn(dstFramePtr, m_frameWidth, m_frameHeight, (m_frameWidth * bytesPerPixel),
+				  frame_label, 1, 2);
+			m_last_insert++;
+		}
+	}
 
 	if (m_deckLinkOutput->ScheduleVideoFrame(newFrame, (m_totalFramesScheduled * m_frameDuration), m_frameDuration, m_frameTimescale) != S_OK)
 		return;
