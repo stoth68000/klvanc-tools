@@ -70,6 +70,8 @@ private:
 	int m_msg_line;
 	int m_msg_data_length; /* In Bytes */
 	unsigned char m_msg_data[1024];
+	unsigned int m_frame_num;
+	int m_last_insert; /* Number of frames since last VANC insertion */
 	/* End: LTN */
 
 public:

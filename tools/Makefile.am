@@ -10,15 +10,14 @@ AM_CPPFLAGS = -DVERSION=\"$(VERSION)\" -DPROG="\"$(PACKAGE)\"" -D_FILE_OFFSET_BI
 	-DKL_USERSPACE -D__STDC_FORMAT_MACROS $(ZLIB_CFLAGS)
 
 AM_CFLAGS = -Wall -O3
-AM_CXXFLAGS = -std=c++11
+AM_CXXFLAGS = -Wall -O3 -std=c++11
 
 LDADD = -lpthread -lz -ldl -lklvanc $(ZLIB_LIBS)
 
 if DEBUG
-	CFLAGS += -g
+CFLAGS += -g
+CXXFLAGS += -g
 endif
-
-CXXFLAGS = $(CFLAGS)
 
 SRC  = klvanc_util.c
 SRC += $(BLACKMAGIC_SDK_PATH)//DeckLinkAPIDispatch.cpp
@@ -29,7 +28,7 @@ SRC += frame-writer.c
 SRC += smpte337_detector.c
 SRC += rcwt.c
 SRC += nielsen.cpp
-SRC += Config.cpp db.cpp transmitter.cpp
+SRC += Config.cpp db.cpp transmitter.cpp v210burn.c
 SRC += blackmagic-utils.cpp
 SRC += kl-lineartrend.c
 

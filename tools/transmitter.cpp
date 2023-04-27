@@ -38,12 +38,15 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <arpa/inet.h>
+#if HAVE_CURSES_H
 #include <curses.h>
+#endif
 #include <inttypes.h>
 
 #include "transmitter.h"
 #include "db.h"
 #include "decklink_portability.h"
+#include "v210burn.h"
 
 pthread_mutex_t			sleepMutex;
 pthread_cond_t			sleepCond;
@@ -54,7 +57,6 @@ const unsigned long		kAudioWaterlevel = 48000;
 pthread_t vancmenus_threadId;
 static int g_vancmenus_sentMessageCount = 0;
 
-static int dbcount = 0;
 struct db_entry_s {
 	char key;
 	char title;
@@ -168,6 +170,7 @@ void generate_msg__type_a(struct vancmenus_context_s *ctx, int value)
 	g_vancmenus_sentMessageCount++;
 }
 
+#if HAVE_CURSES_H
 static void vancmenus_draw(struct vancmenus_context_s *ctx)
 {
 	int linenr = 0;
@@ -175,9 +178,9 @@ static void vancmenus_draw(struct vancmenus_context_s *ctx)
 	clear();
 
 	char line_a[160], line_b[160], line_c[160];
-	sprintf(line_a, "VANC Transmitter Menus");
-	sprintf(line_b, "");
-	sprintf(line_c, "Frames: %" PRIi64 " Sent: %d (%s)", ctx->generator->getScheduledFrameCount(),
+	snprintf(line_a, sizeof(line_a), "VANC Transmitter Menus");
+	snprintf(line_b, sizeof(line_b), "%s", "");
+	snprintf(line_c, sizeof(line_c), "Frames: %" PRIi64 " Sent: %d (%s)", ctx->generator->getScheduledFrameCount(),
 		g_vancmenus_sentMessageCount, ctx->generator->m_displayModeName);
 	int blen = 76 - (strlen(line_a) + strlen(line_c));
 	memset(line_b, 0x20, sizeof(line_b));
@@ -210,9 +213,9 @@ static void vancmenus_draw(struct vancmenus_context_s *ctx)
 
 	time_t now;
 	time(&now);
-	sprintf(line_a, "LTN Global Communications, Inc.");
-	sprintf(line_b, "");
-	sprintf(line_c, "%s", ctime(&now));
+	snprintf(line_a, sizeof(line_a), "LTN Global Communications, Inc.");
+	snprintf(line_b, sizeof(line_b), "%s", "");
+	snprintf(line_c, sizeof(line_c), "%s", ctime(&now));
 
 	blen = 77 - (strlen(line_a) + strlen(line_c));
 	memset(line_b, 0x20, sizeof(line_b));
@@ -264,6 +267,7 @@ static void *vancmenus_thread_func(void *p)
 
 	return NULL;
 }
+#endif
 
 static int _main(int argc, char *argv[])
 {
@@ -286,7 +290,7 @@ static int _main(int argc, char *argv[])
 	}
 
 	generator = new TestPattern(&config);
-
+#if HAVE_CURSES_H
 	if (config.m_interactiveVANCMenus) {
 		ltn_db_load(config.m_vancCfgName);
 
@@ -295,14 +299,17 @@ static int _main(int argc, char *argv[])
 		vancmenus_ctx.config = &config;
 		pthread_create(&vancmenus_threadId, 0, vancmenus_thread_func, &vancmenus_ctx);
 	}
+#endif
 
 	if (!generator->Run())
 		goto bail;
 
+#if HAVE_CURSES_H
 	if (config.m_interactiveVANCMenus) {
 		vancmenus_ctx.running = 1;
 		usleep(150 * 1000);
 	}
+#endif
 
 	// All Okay.
 	exitStatus = 0;
@@ -322,7 +329,6 @@ TestPattern::~TestPattern()
 
 TestPattern::TestPattern(BMDConfig *config) :
 	m_refCount(1),
-	m_msg_data_length(0),
 	m_config(config),
 	m_running(false),
 	m_deckLink(),
@@ -331,7 +337,10 @@ TestPattern::TestPattern(BMDConfig *config) :
 	m_videoFrameBlack(),
 	m_videoFrameBars(),
 	m_audioBuffer(),
-	m_audioSampleRate(bmdAudioSampleRate48kHz)
+	m_audioSampleRate(bmdAudioSampleRate48kHz),
+	m_msg_data_length(0),
+	m_frame_num(0),
+	m_last_insert(-1)
 {
 	pthread_mutex_init(&m_msg_mutex, NULL);
 	m_displayModeName = NULL;
@@ -344,7 +353,6 @@ bool TestPattern::Run()
 	bool							success = false;
 
 	IDeckLinkIterator*				deckLinkIterator = NULL;
-	IDeckLinkDisplayModeIterator*	displayModeIterator = NULL;
 	DECKLINK_STR displayModeNameTmp = NULL;
 
 	// Get the DeckLink device
@@ -377,24 +385,10 @@ bool TestPattern::Run()
 		goto bail;
 
 	// Get the display mode
-	idx = m_config->m_displayModeIndex;
-
-	result = m_deckLinkOutput->GetDisplayModeIterator(&displayModeIterator);
-	if (result != S_OK)
-		goto bail;
-
-	while ((result = displayModeIterator->Next(&m_displayMode)) == S_OK)
+	m_displayMode = m_config->GetDeckLinkDisplayMode(m_deckLink, m_config->m_displayMode);
+	if (m_displayMode == NULL)
 	{
-		if (idx == 0)
-			break;
-		--idx;
-
-		m_displayMode->Release();
-	}
-
-	if (result != S_OK || m_displayMode == NULL)
-	{
-		fprintf(stderr, "Unable to get display mode %d\n", m_config->m_displayModeIndex);
+		fprintf(stderr, "Unable to get display mode %x\n", m_config->m_displayMode);
 		goto bail;
 	}
 
@@ -403,7 +397,7 @@ bool TestPattern::Run()
 	if (result != S_OK)
 	{
 		m_displayModeName = (char *)malloc(32);
-		snprintf(m_displayModeName, 32, "[index %d]", m_config->m_displayModeIndex);
+		snprintf(m_displayModeName, 32, "[%x]", m_config->m_displayMode);
 	} else {
 		m_displayModeName = DECKLINK_STRDUP(displayModeNameTmp);
 		DECKLINK_FREE(displayModeNameTmp);
@@ -443,9 +437,6 @@ bail:
 	if (m_displayMode != NULL)
 		m_displayMode->Release();
 
-	if (displayModeIterator != NULL)
-		displayModeIterator->Release();
-
 	if (m_deckLinkOutput != NULL)
 		m_deckLinkOutput->Release();
 
@@ -462,7 +453,6 @@ void TestPattern::StartRunning()
 {
 	HRESULT					result;
 	unsigned long			audioSamplesPerFrame;
-	IDeckLinkVideoFrame*	rightFrame;
 
 	m_frameWidth = m_displayMode->GetWidth();
 	m_frameHeight = m_displayMode->GetHeight();
@@ -579,6 +569,8 @@ void TestPattern::StopRunning()
 
 void TestPattern::ScheduleNextFrame(bool prerolling)
 {
+	char frame_label[64];
+
 	if (prerolling == false)
 	{
 		// If not prerolling, make sure that playback is still active
@@ -649,11 +641,32 @@ void TestPattern::ScheduleNextFrame(bool prerolling)
 			break;
 		}
 
+		if (m_config->m_pixelFormat == bmdFormat10BitYUV) {
+			snprintf(frame_label, sizeof(frame_label), "Injecting VANC (line %d)", m_msg_line);
+			v210_burn(dstFramePtr, m_frameWidth, m_frameHeight,  (m_frameWidth * bytesPerPixel),
+				  frame_label, 1, 3);
+		}
+
 		//printf("Sending vanc %d bytes line %d\n", m_msg_data_length, m_msg_line);
 		vanc->Release();
 		m_msg_data_length = 0;
+		m_last_insert = 0;
 	}
 	pthread_mutex_unlock(&m_msg_mutex);
+
+        /* Burn frame counters into the video */
+	if (m_config->m_pixelFormat == bmdFormat10BitYUV) {
+		snprintf(frame_label, sizeof(frame_label), "Frame: %d", m_frame_num);
+		m_frame_num++;
+		v210_burn(dstFramePtr, m_frameWidth, m_frameHeight, (m_frameWidth * bytesPerPixel),
+			  frame_label, 1, 1);
+		if (m_last_insert != -1) {
+			snprintf(frame_label, sizeof(frame_label), "Last insert: %d", m_last_insert);
+			v210_burn(dstFramePtr, m_frameWidth, m_frameHeight, (m_frameWidth * bytesPerPixel),
+				  frame_label, 1, 2);
+			m_last_insert++;
+		}
+	}
 
 	if (m_deckLinkOutput->ScheduleVideoFrame(newFrame, (m_totalFramesScheduled * m_frameDuration), m_frameDuration, m_frameTimescale) != S_OK)
 		return;
@@ -854,9 +867,9 @@ void FillColourBars(IDeckLinkMutableVideoFrame* theFrame, bool reverse)
 
 	if (reverse)
 	{
-		for (long y = 0; y < height; y++)
+		for (unsigned long y = 0; y < height; y++)
 		{
-			for (long x = width - 2; x >= 0; x -= 2)
+			for (unsigned long x = width - 2; x >= 0; x -= 2)
 			{
 				*(nextWord++) = bars[(x * 8) / width];
 			}
@@ -864,9 +877,9 @@ void FillColourBars(IDeckLinkMutableVideoFrame* theFrame, bool reverse)
 	}
 	else
 	{
-		for (long y = 0; y < height; y++)
+		for (unsigned long y = 0; y < height; y++)
 		{
-			for (long x = 0; x < width; x += 2)
+			for (unsigned long x = 0; x < width; x += 2)
 			{
 				*(nextWord++) = bars[(x * 8) / width];
 			}
