@@ -539,6 +539,9 @@ void TestPattern::StartRunning()
 	return;
 
 bail:
+	m_running = false;
+	exit(1);
+
 	// *** Error-handling code.  Cleanup any resources that were allocated. *** //
 	StopRunning();
 }
