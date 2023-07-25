@@ -1766,6 +1766,33 @@ static int cb_SCTE_104(void *callback_context, struct klvanc_context_s *ctx, str
 	return 0;
 }
 
+static int cb_SDP(void *callback_context, struct klvanc_context_s *ctx, struct klvanc_packet_sdp_s *pkt)
+{
+	/* Have the library display some debug */
+	if (!g_monitor_mode && g_verbose)
+		klvanc_dump_SDP(ctx, pkt);
+
+	return 0;
+}
+
+static int cb_SMPTE_12_2(void *callback_context, struct klvanc_context_s *ctx, struct klvanc_packet_smpte_12_2_s *pkt)
+{
+	/* Have the library display some debug */
+	if (!g_monitor_mode && g_verbose)
+		klvanc_dump_SMPTE_12_2(ctx, pkt);
+
+	return 0;
+}
+
+static int cb_SMPTE_2108_1(void *callback_context, struct klvanc_context_s *ctx, struct klvanc_packet_smpte_2108_1_s *pkt)
+{
+	/* Have the library display some debug */
+	if (!g_monitor_mode && g_verbose)
+		klvanc_dump_SMPTE_2108_1(ctx, pkt);
+
+	return 0;
+}
+
 static int cb_all(void *callback_context, struct klvanc_context_s *ctx, struct klvanc_packet_header_s *pkt)
 {
 	/* Save the packet to disk, if reqd. */
@@ -1823,6 +1850,9 @@ static struct klvanc_callbacks_s callbacks =
 	.scte_104               = cb_SCTE_104,
 	.all                    = cb_all,
 	.kl_i64le_counter       = cb_VANC_TYPE_KL_UINT64_COUNTER,
+	.sdp                    = cb_SDP,
+	.smpte_12_2             = cb_SMPTE_12_2,
+	.smpte_2108_1           = cb_SMPTE_2108_1,
 };
 
 /* END - CALLBACKS for message notification */
