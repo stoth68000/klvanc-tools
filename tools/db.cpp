@@ -89,8 +89,6 @@ int ltn_db_load(const char *cfgfile)
 
 		/* Load arbitrary data, re-align length for V210 and into something the blackmagic SDK wants to playout. */
 		size_t l = fread(&db[ltn_db_count].payload[0], 2, 1024, fh);
-		l += 24;
-		l = ((l + 5) / 6) * 6; /* align for v210 */
 		db[ltn_db_count].payloadWords = l;
 
 		fclose(fh);
