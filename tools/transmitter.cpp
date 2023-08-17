@@ -47,6 +47,7 @@
 #include "db.h"
 #include "decklink_portability.h"
 #include "v210burn.h"
+#include "libklvanc/pixels.h"
 
 pthread_mutex_t			sleepMutex;
 pthread_cond_t			sleepCond;
@@ -78,16 +79,20 @@ static inline void le32(uint8_t **p, uint32_t d)
     (*p) += 4;
 }
 
-static void write_vanc_msg(uint8_t *dst, const uint16_t *msg, uint16_t msgWordLength)
+// Returns the size in bytes of the output v210 buffer
+static int write_vanc_msg(uint8_t *dst, const uint16_t *msg, uint16_t msgWordLength)
 {
-    /* convert to v210 and write into VBI line of VANC */
-    size_t len = msgWordLength / 6;
-    for (size_t w = 0; w < len; w++) {
-        le32(&dst, msg[w * 6 + 0] << 10);
-        le32(&dst, msg[w * 6 + 1] | (msg[w * 6 + 2] << 20));
-        le32(&dst, msg[w * 6 + 3] << 10);
-        le32(&dst, msg[w * 6 + 4] | (msg[w * 6 + 5] << 20));
-    }
+	int v210_len;
+
+	klvanc_y10_to_v210((uint16_t *) msg, dst, msgWordLength);
+
+	/* Figure out the actual size of the resulting v210 buffer */
+	v210_len = msgWordLength / 6;
+	if (msgWordLength % 6)
+		v210_len++;
+	v210_len *= 16;
+
+	return v210_len;
 }
 
 void hexdump(const unsigned char *p, int lengthBytes)
@@ -141,9 +146,7 @@ static int generate_vanc__64bit_value(uint8_t *dst, uint64_t value)
         msg[i] = 0x040;
 
     /* convert to v210 and write into VANC */
-    write_vanc_msg(dst, &msg[0], s);
-
-    return (s * 2) + 6;
+    return write_vanc_msg(dst, msg, s);
 }
 
 struct vancmenus_context_s {
@@ -155,10 +158,11 @@ struct vancmenus_context_s {
 void generate_vanc_msg(struct vancmenus_context_s *ctx, const struct ltn_db_entry_s *e)
 {
 	unsigned char buf[2048] = { 0 };
+	int v210_len;
 
-	write_vanc_msg(&buf[0], &e->payload[0], e->payloadWords);
-	//hexdump(&buf[0], sizeof(buf));
-	ctx->generator->sendVANCMessage(e->lineNr, &buf[0], (e->payloadWords + 2) * 2);
+	v210_len = write_vanc_msg(buf, &e->payload[0], e->payloadWords);
+
+	ctx->generator->sendVANCMessage(e->lineNr, &buf[0], v210_len);
 	g_vancmenus_sentMessageCount++;
 }
 

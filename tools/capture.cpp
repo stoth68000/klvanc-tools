@@ -1111,7 +1111,7 @@ static void ProcessVANC(IDeckLinkVideoInputFrame * frame)
 		}
 	}
 
-	if (g_verbose) {
+	if (g_verbose > 1) {
 		fprintf(stdout, "PixelFormat %x [%s] DisplayMode [%s] Wrote %d [potential] VANC lines\n",
 			pf,
 			pf == bmdFormat8BitYUV ? "bmdFormat8BitYUV" :
@@ -1431,7 +1431,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 			if (frameTime->remoteFrameCount + 1 == currRFC)
 				isBad = 0;
 
-			if (g_verbose) {
+			if (g_verbose > 1) {
 				fprintf(stdout,
 					"Frame received (#%10llu) [%s] - %s - Size: %li bytes (%7.2f ms) [remoteFrame: %d] ",
 					frameTime->frameCount,
@@ -1511,7 +1511,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 		double interval = t - frameTime->lastTime;
 		interval /= 10;
 
-		if (g_verbose) {
+		if (g_verbose > 1) {
 			fprintf(stdout,
 				"Audio received (#%10lu) - Size: %u sfc: %lu channels: %u depth: %u bytes  (%7.2f ms)\n",
 				audioFrameCount,
