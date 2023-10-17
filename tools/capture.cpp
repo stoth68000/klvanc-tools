@@ -110,6 +110,7 @@ static pthread_cond_t sleepCond;
 static int videoOutputFile = -1;
 static int audioOutputFile = -1;
 
+static int g_silencemax = -1;
 static struct fwr_session_s *writeSession = NULL;
 
 static int vancOutputFile = -1;
@@ -273,6 +274,10 @@ void checkForSilence(IDeckLinkAudioInputPacket* audioFrame, int channelNr, int a
 	if (audioFrame->GetSampleFrameCount() > 800)
 		limit = 48;
 
+	/* Operator can override the upper limit */
+	if (g_silencemax != -1)
+		limit = g_silencemax;
+
 	for (int s = 0; s < audioFrame->GetSampleFrameCount(); s++) {
 		uint32_t dw = *p;
 		if (dw == 0) {
@@ -287,7 +292,7 @@ void checkForSilence(IDeckLinkAudioInputPacket* audioFrame, int channelNr, int a
 		p += audioChannelCount;
 	}
 
-	if (silence > limit) {
+	if (silence >= limit) {
 		time_t now;
 		time(&now);
 		double lostMS = (double)silence / 48.0;
@@ -1944,6 +1949,7 @@ static int usage(const char *progname, int status)
 		"    -ed             Exclude data (vanc) from muxed output file.\n"
 		"    -X <filename>   Analyze a muxed audio+video+vanc input file.\n"
 		"    -Z <pair# 1-8>  Check for audio silence on the given audio pairs.\n"
+		"    -K <number>     audio samples ceiling before tripping silence alert (-Z). (def: 24)\n"
 		"    -T <dirname>    Save all vanc messages into dirname as a seperate unique file (16bit words).\n"
 		"    -H              Monitor frame arrival intervals, attempt to measure SDI inputs that run less than realtime\n"
 		"                    Make sure you specify -m and force the video mode when using this feature\n"
@@ -2033,7 +2039,7 @@ static int _main(int argc, char *argv[])
 	memset(&g_asctx, 0, sizeof(g_asctx));
 
 	int v;
-	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:Bm:n:p:t:vV:HI:i:l:LP:MNSx:X:R:e:T:Z:")) != -1) {
+	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:Bm:n:p:t:vV:HI:i:K:l:LP:MNSx:X:R:e:T:Z:")) != -1) {
 		switch (ch) {
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 		case 'S':
@@ -2041,6 +2047,9 @@ static int _main(int argc, char *argv[])
 			g_prbs_initialized = 0;
 			break;
 #endif
+		case 'K':
+			g_silencemax = atoi(optarg);
+			break;
 		case 'm':
 			selectedDisplayMode  = *(optarg + 0) << 24;
 			selectedDisplayMode |= *(optarg + 1) << 16;
