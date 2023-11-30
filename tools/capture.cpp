@@ -158,6 +158,14 @@ static BMDVideoInputFlags g_inputFlags = bmdVideoInputEnableFormatDetection;
 static BMDPixelFormat g_pixelFormat = bmdFormat10BitYUV;
 struct fwr_header_timing_s ftfirst, ftlast;
 
+/* 1602 + 1601 + 1602 + 1601 + 1602 = 8008
+ * 48000 / 8008 = 5.994
+ */
+static int g_1080i2997_cadence_check = 0;
+static int g_1080i2997_cadence_set[5]  = { 1602, 1601, 1602, 1601, 1602 }; /* 48KHz 2997 */
+static int g_1080i2997_cadence_match[5]= {    0,    0,    0,    0,    0 };
+static int g_1080i2997_cadence_hist[5] = {    0,    0,    0,    0,    0 };
+
 static int g_hires_av_debug = 0;
 static struct hires_av_ctx_s g_havctx;
 static struct kllineartrend_context_s *g_trendctx;
@@ -1209,6 +1217,69 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 	if (g_shutdown == 2)
 		return S_OK;
 
+	/* Optionally check the audio sample cadence as per SMPTE299-1:1997 table 5 page 12 */
+	if (audioFrame && g_1080i2997_cadence_check && g_detected_mode_id == bmdModeHD1080i5994) {
+		int depth = audioFrame->GetSampleFrameCount();
+		int setlen = 5;
+
+		/* Setup our matching table if needed, usually a one time cost */
+		if (g_1080i2997_cadence_match[0] == 0) {
+			memcpy(&g_1080i2997_cadence_match[0], &g_1080i2997_cadence_set[0], sizeof(g_1080i2997_cadence_set));
+		}
+
+		/* Rotate the history and the match sequence sets, then add the new cadance sample to history. */
+		int m = g_1080i2997_cadence_match[0];
+		for (int i = 1; i < setlen; i++) {
+			g_1080i2997_cadence_hist[i - 1] = g_1080i2997_cadence_hist[i];
+			g_1080i2997_cadence_match[i - 1] = g_1080i2997_cadence_match[i];
+		}
+		g_1080i2997_cadence_hist[setlen - 1] = depth;
+		g_1080i2997_cadence_match[setlen - 1] = m;
+
+#if 0
+		static int vvv = 0;
+		if (vvv++ == 100) {
+			/* Damage the history just after startup to induce a control test */
+			g_1080i2997_cadence_hist[2] = 1234;
+		}
+#endif
+
+		/* See if we match the history and match set, meaning our history is syncronized and cadence is perfect */
+		if (memcmp(&g_1080i2997_cadence_match[0], &g_1080i2997_cadence_hist[0], sizeof(g_1080i2997_cadence_hist)) == 0) {
+			/* Cadence match */
+		} else {
+
+			/* Try to match the history across all five match positions, and align the match set with the measured history.
+			 * The goal here is to accept that we might have valid candence in history and we need to align out match
+			 * set to the candence to syncronize our candence.
+			 */
+			int j;
+			for (j = 1; j <= setlen; j++) {
+				m = g_1080i2997_cadence_match[0];
+				for (int i = 1; i <= (setlen - 1); i++) {
+					g_1080i2997_cadence_match[i - 1] = g_1080i2997_cadence_match[i];
+				}
+				g_1080i2997_cadence_match[setlen - 1] = m;
+				if (memcmp(&g_1080i2997_cadence_match[0], &g_1080i2997_cadence_hist[0], sizeof(g_1080i2997_cadence_hist)) == 0) {
+					printf("1080i29.97 audio cadence matched, after adjusting set\n");
+					break;
+				}
+			}
+			if (j > setlen) {
+				time_t now = time(NULL);
+				printf("1080i29.97 audio cadence not matched, after adjusting set:  ");
+				for (int i = 0; i < setlen; i++) {
+					printf("%d ", g_1080i2997_cadence_match[i]);
+				}
+				printf(", ");
+				for (int i = 0; i < setlen; i++) {
+					printf("%d ", g_1080i2997_cadence_hist[i]);
+				}
+				printf(" @ %s", ctime(&now));
+			}
+		}
+	}
+
 	/* Measure any a/v offsets specific to a black/white flash pattern, if enabled. */
 	if (videoFrame && audioFrame && g_bw_flash_measurements && g_bw_flash_initialized == 0) {
 
@@ -1930,6 +2001,7 @@ static int usage(const char *progname, int status)
 		"    -n <frames>     Number of frames to capture (def: unlimited)\n"
 		"    -v              Increase level of verbosity (def: 0)\n"
 		"    -3              Capture Stereoscopic 3D (Requires 3D Hardware support)\n"
+		"    -9              Check for SMPTE-299M-1 1080i29.97 audio frame cadence (console only)\n"
 		"    -i <number>     Capture from input port (def: 0)\n"
 		"    -P pid 0xNNNN   Packetsize all detected VANC into SMPTE2038 TS packets using pid.\n"
 		"                    The packets are store in file %s\n"
@@ -2010,6 +2082,8 @@ static int usage(const char *progname, int status)
 		"\t\t-i0 -mhp59 -c16 -s32 -Z1 -Z2 -Z4\n"
 		"9) Decode SCTE104 from 1080p59.94, input 3, messages to console (super chatty with other messages too).\n"
 		"\t\t-i3 -mHp59 -v\n"
+		"10) Check 1080i29.97 (specifically) audio cadences are within SDI sped SMPTE-299, messages to console when errors detected.\n"
+		"\t\t-i3 -mHi59 -9\n"
 
 	);
 
@@ -2039,8 +2113,11 @@ static int _main(int argc, char *argv[])
 	memset(&g_asctx, 0, sizeof(g_asctx));
 
 	int v;
-	while ((ch = getopt(argc, argv, "?h3c:s:f:a:A:Bm:n:p:t:vV:HI:i:K:l:LP:MNSx:X:R:e:T:Z:")) != -1) {
+	while ((ch = getopt(argc, argv, "?h39c:s:f:a:A:Bm:n:p:t:vV:HI:i:K:l:LP:MNSx:X:R:e:T:Z:")) != -1) {
 		switch (ch) {
+		case '9':
+			g_1080i2997_cadence_check = 1;
+			break;
 #if HAVE_LIBKLMONITORING_KLMONITORING_H
 		case 'S':
 			g_monitor_prbs_audio_mode = 1;
