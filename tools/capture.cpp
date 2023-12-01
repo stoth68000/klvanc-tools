@@ -1271,7 +1271,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 				for (int i = 0; i < setlen; i++) {
 					printf("%d ", g_1080i2997_cadence_match[i]);
 				}
-				printf(", ");
+				printf(", recd: ");
 				for (int i = 0; i < setlen; i++) {
 					printf("%d ", g_1080i2997_cadence_hist[i]);
 				}
