@@ -1606,7 +1606,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 				uint32_t *p = (uint32_t *)audioFrameBytes;
 				/* This is a little messy, calling the API hundreds of times per buffer. Good enough for now. */
 				for (int i = 0; i < audioFrame->GetSampleFrameCount(); i++) {
-					for (int j = 0; j < g_audioChannels / 2; j++) {
+					for (unsigned int j = 0; j < g_audioChannels / 2; j++) {
 						p++; /* Right */
 
 						/* Left channel on Pair X */
@@ -2285,7 +2285,7 @@ static int _main(int argc, char *argv[])
 
 #if ENABLE_NIELSEN
 	if (g_enable_nielsen) {
-		for (int i = 0; i < g_audioChannels / 2; i++) {
+		for (unsigned int i = 0; i < g_audioChannels / 2; i++) {
 			pNielsenParams[i] = new CMonitorSdkParameters();
 			pNielsenParams[i]->SetSampleSize(32);
 			pNielsenParams[i]->SetPackingMode(FourBytesMsbPadding);
@@ -2483,7 +2483,7 @@ static int _main(int argc, char *argv[])
 #endif
 
 #if ENABLE_NIELSEN
-	for (int i = 0; i < g_audioChannels / 2; i++) {
+	for (unsigned int i = 0; i < g_audioChannels / 2; i++) {
 		delete pNielsenAPI[i];
 		delete pNielsenCallback[i];
 		delete pNielsenParams[i];
