@@ -43,6 +43,7 @@ BMDConfig::BMDConfig() :
 	m_vancCfgName(NULL),
 	m_outputVideoPattern(kOutputSignalPipBars),
 	m_interactiveVANCMenus(false),
+	m_addFrameCounterVanc(false),
 	m_deckLinkName(),
 	m_displayModeName()
 {
@@ -62,7 +63,7 @@ bool BMDConfig::ParseArguments(int argc,  char** argv)
 	int		ch;
 	bool	displayHelp = false;
 
-	while ((ch = getopt(argc, argv, "d:?hc:s:f:a:m:M:n:p:t:v:")) != -1)
+	while ((ch = getopt(argc, argv, "d:?hkc:s:f:a:m:M:n:p:t:v:")) != -1)
 	{
 		switch (ch)
 		{
@@ -91,6 +92,10 @@ bool BMDConfig::ParseArguments(int argc,  char** argv)
 			case 'M':
 				m_interactiveVANCMenus = true;
 				m_vancCfgName = strdup(optarg);
+				break;
+
+			case 'k':
+				m_addFrameCounterVanc = true;
 				break;
 
 			case 's':
@@ -363,6 +368,7 @@ bail:
 		"    -c <channels>        Audio Channels (2, 8 or 16 - default is 2)\n"
 		"    -s <depth>           Audio Sample Depth (16 or 32 - default is 16)\n"
 		"    -M <cfgfile>         Enter VANC message injection menus, using a specific vanc configuration\n"
+		"    -k                   Inject KL frame counters into VANC on line 14\n"
 		"\n"
 		"Output a test pattern and start the interactive VANC transmitter UI:\n"
 		"\n"

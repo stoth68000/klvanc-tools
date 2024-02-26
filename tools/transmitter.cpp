@@ -47,7 +47,7 @@
 #include "db.h"
 #include "decklink_portability.h"
 #include "v210burn.h"
-#include "libklvanc/pixels.h"
+#include "libklvanc/vanc.h"
 
 pthread_mutex_t			sleepMutex;
 pthread_cond_t			sleepCond;
@@ -573,25 +573,17 @@ void TestPattern::ScheduleNextFrame(bool prerolling)
 	/* Duplicate original frame into new frame */
 	memcpy(dstFramePtr, srcFramePtr, m_frameHeight * (m_frameWidth * bytesPerPixel));
 
+	IDeckLinkVideoFrameAncillary *vanc;
+	if (m_deckLinkOutput->CreateAncillaryData(bmdFormat10BitYUV, &vanc) != S_OK)
+		return;
+
 	pthread_mutex_lock(&m_msg_mutex);
 	while (m_msg_data_length > 0) {
-		IDeckLinkVideoFrameAncillary *vanc;
-		if (m_deckLinkOutput->CreateAncillaryData(bmdFormat10BitYUV, &vanc) != S_OK) {
-			break;
-		}
-
 		unsigned char *vancBuf = 0;
-		if (vanc->GetBufferForVerticalBlankingLine(m_msg_line, (void**)&vancBuf) != S_OK) {
-			vanc->Release();
+		if (vanc->GetBufferForVerticalBlankingLine(m_msg_line, (void**)&vancBuf) != S_OK)
 			break;
-		}
 
 		memcpy(vancBuf, m_msg_data, m_msg_data_length);
-
-		if (newFrame->SetAncillaryData(vanc) != S_OK) {
-			vanc->Release();
-			break;
-		}
 
 		if (m_config->m_pixelFormat == bmdFormat10BitYUV) {
 			snprintf(frame_label, sizeof(frame_label), "Injecting VANC (line %d)", m_msg_line);
@@ -600,11 +592,32 @@ void TestPattern::ScheduleNextFrame(bool prerolling)
 		}
 
 		//printf("Sending vanc %d bytes line %d\n", m_msg_data_length, m_msg_line);
-		vanc->Release();
 		m_msg_data_length = 0;
 		m_last_insert = 0;
 	}
 	pthread_mutex_unlock(&m_msg_mutex);
+
+	struct klvanc_packet_kl_u64le_counter_s *pkt;
+	if (m_config->m_addFrameCounterVanc && klvanc_create_KL_U64LE_COUNTER(&pkt) == 0) {
+		uint16_t *words;
+		uint16_t wordCount;
+		uint8_t dst[1024];
+		int dstCount;
+		pkt->counter = m_frame_num;
+		klvanc_convert_KL_U64LE_COUNTER_to_words(pkt, &words, &wordCount);
+
+		dstCount = write_vanc_msg(dst, words, wordCount);
+
+		unsigned char *vancBuf = 0;
+		if (vanc->GetBufferForVerticalBlankingLine(14, (void**)&vancBuf) == S_OK)
+			memcpy(vancBuf, dst, dstCount);
+		free(pkt);
+	}
+
+	if (newFrame->SetAncillaryData(vanc) != S_OK) {
+		printf("Could not set ancillary data\n");
+	}
+	vanc->Release();
 
         /* Burn frame counters into the video */
 	if (m_config->m_pixelFormat == bmdFormat10BitYUV) {
