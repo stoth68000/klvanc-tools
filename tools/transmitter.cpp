@@ -102,53 +102,6 @@ void hexdump(const unsigned char *p, int lengthBytes)
 	fprintf(stderr, "\n");
 }
 
-static int generate_vanc__64bit_value(uint8_t *dst, uint64_t value)
-{
-    const size_t len = 6 /* vanc header */ + 8 /* counter data */ + 1 /* csum */;
-    const size_t s = ((len + 5) / 6) * 6; /* align for v210 */
-    
-    uint16_t msg[64];
-    uint16_t l = 0;
-    
-    /* Construct the message */
-    msg[l++] = 0x000;
-    msg[l++] = 0x3ff;
-    msg[l++] = 0x3ff;
-    msg[l++] = 0x040;
-    msg[l++] = 0x0fe;
-    msg[l++] = 0x008;
-    msg[l++] = (value >> 56) & 0x0ff;
-    msg[l++] = (value >> 48) & 0x0ff;
-    msg[l++] = (value >> 40) & 0x0ff;
-    msg[l++] = (value >> 32) & 0x0ff;
-    msg[l++] = (value >> 24) & 0x0ff;
-    msg[l++] = (value >> 16) & 0x0ff;
-    msg[l++] = (value >>  8) & 0x0ff;
-    msg[l++] = value & 0x0ff;
-    
-    /* parity bit */
-    for (size_t i = 3; i < len - 1; i++)
-        msg[i] |= __builtin_parity(msg[i]) ? 0x100 : 0x200;
-    
-    /* vanc checksum */
-    uint16_t vanc_sum = 0;
-    for (size_t i = 3; i < len - 1; i++) {
-        vanc_sum += msg[i];
-        vanc_sum &= 0x1ff;
-        //printf("%03x ", msg[i]);
-    }
-    //printf("\n");
-
-    msg[len - 1] = vanc_sum | ((~vanc_sum & 0x100) << 1);
-
-    /* pad */
-    for (size_t i = len; i < s; i++)
-        msg[i] = 0x040;
-
-    /* convert to v210 and write into VANC */
-    return write_vanc_msg(dst, msg, s);
-}
-
 struct vancmenus_context_s {
 	TestPattern *generator;
 	BMDConfig *config;
@@ -163,14 +116,6 @@ void generate_vanc_msg(struct vancmenus_context_s *ctx, const struct ltn_db_entr
 	v210_len = write_vanc_msg(buf, &e->payload[0], e->payloadWords);
 
 	ctx->generator->sendVANCMessage(e->lineNr, &buf[0], v210_len);
-	g_vancmenus_sentMessageCount++;
-}
-
-void generate_msg__type_a(struct vancmenus_context_s *ctx, int value)
-{
-	unsigned char buf[256];
-	int len = generate_vanc__64bit_value(&buf[0], value);
-	ctx->generator->sendVANCMessage(9, &buf[0], len);
 	g_vancmenus_sentMessageCount++;
 }
 
