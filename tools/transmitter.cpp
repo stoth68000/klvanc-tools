@@ -47,7 +47,7 @@
 #include "db.h"
 #include "decklink_portability.h"
 #include "v210burn.h"
-#include "libklvanc/pixels.h"
+#include "libklvanc/vanc.h"
 
 pthread_mutex_t			sleepMutex;
 pthread_cond_t			sleepCond;
@@ -102,53 +102,6 @@ void hexdump(const unsigned char *p, int lengthBytes)
 	fprintf(stderr, "\n");
 }
 
-static int generate_vanc__64bit_value(uint8_t *dst, uint64_t value)
-{
-    const size_t len = 6 /* vanc header */ + 8 /* counter data */ + 1 /* csum */;
-    const size_t s = ((len + 5) / 6) * 6; /* align for v210 */
-    
-    uint16_t msg[64];
-    uint16_t l = 0;
-    
-    /* Construct the message */
-    msg[l++] = 0x000;
-    msg[l++] = 0x3ff;
-    msg[l++] = 0x3ff;
-    msg[l++] = 0x040;
-    msg[l++] = 0x0fe;
-    msg[l++] = 0x008;
-    msg[l++] = (value >> 56) & 0x0ff;
-    msg[l++] = (value >> 48) & 0x0ff;
-    msg[l++] = (value >> 40) & 0x0ff;
-    msg[l++] = (value >> 32) & 0x0ff;
-    msg[l++] = (value >> 24) & 0x0ff;
-    msg[l++] = (value >> 16) & 0x0ff;
-    msg[l++] = (value >>  8) & 0x0ff;
-    msg[l++] = value & 0x0ff;
-    
-    /* parity bit */
-    for (size_t i = 3; i < len - 1; i++)
-        msg[i] |= __builtin_parity(msg[i]) ? 0x100 : 0x200;
-    
-    /* vanc checksum */
-    uint16_t vanc_sum = 0;
-    for (size_t i = 3; i < len - 1; i++) {
-        vanc_sum += msg[i];
-        vanc_sum &= 0x1ff;
-        //printf("%03x ", msg[i]);
-    }
-    //printf("\n");
-
-    msg[len - 1] = vanc_sum | ((~vanc_sum & 0x100) << 1);
-
-    /* pad */
-    for (size_t i = len; i < s; i++)
-        msg[i] = 0x040;
-
-    /* convert to v210 and write into VANC */
-    return write_vanc_msg(dst, msg, s);
-}
-
 struct vancmenus_context_s {
 	TestPattern *generator;
 	BMDConfig *config;
@@ -163,14 +116,6 @@ void generate_vanc_msg(struct vancmenus_context_s *ctx, const struct ltn_db_entr
 	v210_len = write_vanc_msg(buf, &e->payload[0], e->payloadWords);
 
 	ctx->generator->sendVANCMessage(e->lineNr, &buf[0], v210_len);
-	g_vancmenus_sentMessageCount++;
-}
-
-void generate_msg__type_a(struct vancmenus_context_s *ctx, int value)
-{
-	unsigned char buf[256];
-	int len = generate_vanc__64bit_value(&buf[0], value);
-	ctx->generator->sendVANCMessage(9, &buf[0], len);
 	g_vancmenus_sentMessageCount++;
 }
 
@@ -628,25 +573,17 @@ void TestPattern::ScheduleNextFrame(bool prerolling)
 	/* Duplicate original frame into new frame */
 	memcpy(dstFramePtr, srcFramePtr, m_frameHeight * (m_frameWidth * bytesPerPixel));
 
+	IDeckLinkVideoFrameAncillary *vanc;
+	if (m_deckLinkOutput->CreateAncillaryData(bmdFormat10BitYUV, &vanc) != S_OK)
+		return;
+
 	pthread_mutex_lock(&m_msg_mutex);
 	while (m_msg_data_length > 0) {
-		IDeckLinkVideoFrameAncillary *vanc;
-		if (m_deckLinkOutput->CreateAncillaryData(bmdFormat10BitYUV, &vanc) != S_OK) {
-			break;
-		}
-
 		unsigned char *vancBuf = 0;
-		if (vanc->GetBufferForVerticalBlankingLine(m_msg_line, (void**)&vancBuf) != S_OK) {
-			vanc->Release();
+		if (vanc->GetBufferForVerticalBlankingLine(m_msg_line, (void**)&vancBuf) != S_OK)
 			break;
-		}
 
 		memcpy(vancBuf, m_msg_data, m_msg_data_length);
-
-		if (newFrame->SetAncillaryData(vanc) != S_OK) {
-			vanc->Release();
-			break;
-		}
 
 		if (m_config->m_pixelFormat == bmdFormat10BitYUV) {
 			snprintf(frame_label, sizeof(frame_label), "Injecting VANC (line %d)", m_msg_line);
@@ -655,11 +592,32 @@ void TestPattern::ScheduleNextFrame(bool prerolling)
 		}
 
 		//printf("Sending vanc %d bytes line %d\n", m_msg_data_length, m_msg_line);
-		vanc->Release();
 		m_msg_data_length = 0;
 		m_last_insert = 0;
 	}
 	pthread_mutex_unlock(&m_msg_mutex);
+
+	struct klvanc_packet_kl_u64le_counter_s *pkt;
+	if (m_config->m_addFrameCounterVanc && klvanc_create_KL_U64LE_COUNTER(&pkt) == 0) {
+		uint16_t *words;
+		uint16_t wordCount;
+		uint8_t dst[1024];
+		int dstCount;
+		pkt->counter = m_frame_num;
+		klvanc_convert_KL_U64LE_COUNTER_to_words(pkt, &words, &wordCount);
+
+		dstCount = write_vanc_msg(dst, words, wordCount);
+
+		unsigned char *vancBuf = 0;
+		if (vanc->GetBufferForVerticalBlankingLine(14, (void**)&vancBuf) == S_OK)
+			memcpy(vancBuf, dst, dstCount);
+		free(pkt);
+	}
+
+	if (newFrame->SetAncillaryData(vanc) != S_OK) {
+		printf("Could not set ancillary data\n");
+	}
+	vanc->Release();
 
         /* Burn frame counters into the video */
 	if (m_config->m_pixelFormat == bmdFormat10BitYUV) {

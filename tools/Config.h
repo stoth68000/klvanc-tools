@@ -65,6 +65,7 @@ public:
 	const char		*m_vancCfgName;
 	enum OutputSignal	m_outputVideoPattern;
 	int			m_interactiveVANCMenus;
+	int                     m_addFrameCounterVanc;
 	/* End: LTN */
 
 private:
