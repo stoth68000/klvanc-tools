@@ -368,7 +368,7 @@ bail:
 		"    -c <channels>        Audio Channels (2, 8 or 16 - default is 2)\n"
 		"    -s <depth>           Audio Sample Depth (16 or 32 - default is 16)\n"
 		"    -M <cfgfile>         Enter VANC message injection menus, using a specific vanc configuration\n"
-		"    -k                   Inject KL frame counters into VANC on line 14\n"
+		"    -k                   Inject KL frame counters into video and VANC on line 14\n"
 		"\n"
 		"Output a test pattern and start the interactive VANC transmitter UI:\n"
 		"\n"
