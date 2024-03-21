@@ -20,6 +20,7 @@
 #include "smpte337_detector.h"
 #include "frame-writer.h"
 #include "rcwt.h"
+#include "v210burn.h"
 
 #include "hires-av-debug.h"
 #include "kl-lineartrend.h"
@@ -119,6 +120,7 @@ static int g_showStartupMemory = 0;
 static int g_verbose = 0;
 static unsigned int g_linenr = 0;
 static uint64_t lastGoodKLFrameCounter = 0;
+static uint64_t lastGoodKLOsdCounter = 0;
 
 /* SMPTE 2038 */
 static int g_packetizeSMPTE2038 = 0;
@@ -152,6 +154,7 @@ static int g_shutdown = 0;
 static int g_monitor_reset = 0;
 static int g_monitor_mode = 0;
 static int g_no_signal = 1;
+static int g_kl_osd_vanc_compare = 0;
 static BMDDisplayMode g_detected_mode_id = selectedDisplayMode;
 static BMDDisplayMode g_requested_mode_id = 0;
 static BMDVideoInputFlags g_inputFlags = bmdVideoInputEnableFormatDetection;
@@ -511,6 +514,14 @@ static void vanc_monitor_stats_dump_curses()
 
 			linecount++;
 		}
+	}
+
+	if (g_kl_osd_vanc_compare) {
+		mvprintw(linecount++, 2, "KL VANC/OSD Frame Counter synchronization");
+
+		mvprintw(linecount++, 2, "video=%d vanc=%d delta=%d\n", lastGoodKLOsdCounter, lastGoodKLFrameCounter,
+			 lastGoodKLOsdCounter - lastGoodKLFrameCounter);
+		linecount++;
 	}
 
 	attron(COLOR_PAIR(2));
@@ -1565,6 +1576,29 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 	if (videoFrame)
 		ProcessVANC(videoFrame);
 
+	if (videoFrame) {
+		unsigned int stride = videoFrame->GetRowBytes();
+		unsigned char *pixelData;
+		videoFrame->GetBytes((void **)&pixelData);
+
+		static uint32_t xxx = 0;
+		lastGoodKLOsdCounter = V210_read_32bit_value(pixelData, stride, 1, 1);
+		if (xxx + 1 != lastGoodKLOsdCounter) {
+                        char t[160];
+			time_t now = time(0);
+                        sprintf(t, "%s", ctime(&now));
+                        t[strlen(t) - 1] = 0;
+			if (!g_monitor_mode)
+				fprintf(stderr, "%s: KL OSD counter discontinuity, expected %08" PRIx32 " got %08" PRIx32 "\n", t, xxx + 1, lastGoodKLOsdCounter);
+		}
+		if (!g_monitor_mode)
+			fprintf(stderr, "video counter=%d vanc counter=%d delta=%d\n", lastGoodKLOsdCounter,
+				lastGoodKLFrameCounter, lastGoodKLOsdCounter - lastGoodKLFrameCounter);
+		xxx = lastGoodKLOsdCounter;
+	}
+
+
+
 	// Handle Audio Frame
 	if (audioFrame) {
 		if (g_hires_av_debug) {
@@ -1989,6 +2023,7 @@ static int usage(const char *progname, int status)
 		"    -V <filename>   raw vanc output filename\n"
 		"    -I <filename>   Interpret and display input VANC filename (See -V)\n"
 		"    -R <filename>   RCWT caption output filename\n"
+		"    -k              Enable analysis of KL frame counters in video and VANC\n"
 		"    -l <linenr>     During -I parse, process a specific line# (def: 0 all)\n"
 		"    -L              List available display modes\n"
 		"    -m <mode>       Force to capture in specified mode\n"
@@ -2113,7 +2148,7 @@ static int _main(int argc, char *argv[])
 	memset(&g_asctx, 0, sizeof(g_asctx));
 
 	int v;
-	while ((ch = getopt(argc, argv, "?h39c:s:f:a:A:Bm:n:p:t:vV:HI:i:K:l:LP:MNSx:X:R:e:T:Z:")) != -1) {
+	while ((ch = getopt(argc, argv, "?h39c:s:f:a:A:Bm:n:p:t:vV:HI:i:K:l:LP:MNSx:X:R:e:T:Z:k")) != -1) {
 		switch (ch) {
 		case '9':
 			g_1080i2997_cadence_check = 1;
@@ -2272,6 +2307,10 @@ static int _main(int argc, char *argv[])
 			}
 			g_analyzeBitmask |= (1 << (v - 1));
 			break;
+		case 'k':
+			g_kl_osd_vanc_compare = 1;
+			break;
+
 		case '?':
 		case 'h':
 			wantHelp = true;
