@@ -64,10 +64,10 @@ int ltn_db_load(const char *cfgfile)
 			continue;
 
 		int r = sscanf(line, "%[^,],%[^,],%d,%[^,]\n",
-			&db[ltn_db_count].key,
-			&db[ltn_db_count].title,
+			&db[ltn_db_count].key[0],
+			&db[ltn_db_count].title[0],
 			&db[ltn_db_count].lineNr,
-			&db[ltn_db_count].filename);
+			&db[ltn_db_count].filename[0]);
 		if (r != 4)
 			continue;
 
