@@ -2058,6 +2058,7 @@ static int usage(const char *progname, int status)
 		"    -Z <pair# 1-8>  Check for audio silence on the given audio pairs.\n"
 		"    -K <number>     audio samples ceiling before tripping silence alert (-Z). (def: 24)\n"
 		"    -T <dirname>    Save all vanc messages into dirname as a seperate unique file (16bit words).\n"
+		"    -Y <seconds>    Monitor SDK callback intervals and report to console periodically.\n"
 		"    -H              Monitor frame arrival intervals, attempt to measure SDI inputs that run less than realtime\n"
 		"                    Make sure you specify -m and force the video mode when using this feature\n"
 		"\n"
@@ -2148,7 +2149,7 @@ static int _main(int argc, char *argv[])
 	memset(&g_asctx, 0, sizeof(g_asctx));
 
 	int v;
-	while ((ch = getopt(argc, argv, "?h39c:s:f:a:A:Bm:n:p:t:vV:HI:i:K:l:LP:MNSx:X:R:e:T:Z:k")) != -1) {
+	while ((ch = getopt(argc, argv, "?h39c:s:f:a:A:Bm:n:p:t:vV:HI:i:K:l:LP:MNSx:X:R:e:T:Y:Z:k")) != -1) {
 		switch (ch) {
 		case '9':
 			g_1080i2997_cadence_check = 1;
@@ -2240,6 +2241,10 @@ static int _main(int argc, char *argv[])
 			break;
 		case 'R':
 			g_rcwtOutputFilename = optarg;
+			break;
+		case 'Y':
+			g_monitorSignalStability = 1;
+			g_hist_print_interval = atoi(optarg);
 			break;
 		case 'n':
 			g_maxFrames = atoi(optarg);
