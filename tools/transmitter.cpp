@@ -612,6 +612,8 @@ void TestPattern::ScheduleNextFrame(bool prerolling)
 		if (vanc->GetBufferForVerticalBlankingLine(14, (void**)&vancBuf) == S_OK)
 			memcpy(vancBuf, dst, dstCount);
 		free(pkt);
+
+		V210_write_32bit_value(dstFramePtr, (m_frameWidth * bytesPerPixel), m_frame_num, 1, 0);
 	}
 
 	if (newFrame->SetAncillaryData(vanc) != S_OK) {
