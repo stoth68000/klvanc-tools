@@ -154,6 +154,7 @@ static int g_shutdown = 0;
 static int g_monitor_reset = 0;
 static int g_monitor_mode = 0;
 static int g_no_signal = 1;
+static int g_print_all_timecodes = 0;
 static int g_kl_osd_vanc_compare = 0;
 static BMDDisplayMode g_detected_mode_id = selectedDisplayMode;
 static BMDDisplayMode g_requested_mode_id = 0;
@@ -1228,6 +1229,58 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 	if (g_shutdown == 2)
 		return S_OK;
 
+	if (g_print_all_timecodes) {
+		struct txtable_s {
+			int valid;
+			BMDTimecodeFormat fmt;
+			BMDTimecodeFlags  flags;
+			IDeckLinkTimecode *ref;
+			const char *name;
+			uint8_t hours, minutes, seconds, frames;
+		} tctable[4] = {
+			{ 0, bmdTimecodeRP188VITC1, 0, NULL, "VITC1", },
+			{ 0, bmdTimecodeRP188VITC2, 0, NULL, "VITC2", },
+			{ 0, bmdTimecodeRP188LTC,   0, NULL, "LTC__", },
+			{ 0, bmdTimecodeRP188Any,   0, NULL, "Any__", },
+		};
+
+		struct frameTime_s *frameTime = &frameTimes[0];
+
+		fprintf(stdout, "Frame received (#%10llu) - %c%c%c%c - ", frameTime->frameCount++,
+			g_detected_mode_id >> 24,
+			g_detected_mode_id >> 16,
+			g_detected_mode_id >>  8,
+			g_detected_mode_id);
+
+		for (int i = 0; i < 4; i++) {
+			struct txtable_s *e = &tctable[i];	
+			if (videoFrame->GetTimecode(e->fmt, &e->ref) == S_OK) {
+				e->valid = 1;
+				e->flags = e->ref->GetFlags();
+				if (e->ref->GetComponents(&e->hours, &e->minutes, &e->seconds, &e->frames) == S_OK) {
+				}
+				printf("%5s [%c%c%c] %02d:%02d:%02d:%02d%s ",
+					e->name,
+					e->flags & bmdTimecodeIsDropFrame ? 'D' : '-',
+                                        e->flags & bmdTimecodeFieldMark ? 'F' : '-',
+                                        e->flags & bmdTimecodeColorFrame ? 'C' : '-',
+					e->hours, e->minutes, e->seconds, e->frames,
+					i == 3 ? "" : ",");
+			} else {
+				tctable[i].valid = 0;
+				printf("%5s [---] .. .. .. .., ", e->name);
+			}
+		}
+		printf("\n");
+		for (int i = 0; i < 4; i++) {
+			struct txtable_s *e = &tctable[i];
+			if (e->valid) {
+				e->ref->Release();
+			}
+		}
+		return S_OK;
+	}
+
 	/* Optionally check the audio sample cadence as per SMPTE299-1:1997 table 5 page 12 */
 	if (audioFrame && g_1080i2997_cadence_check && g_detected_mode_id == bmdModeHD1080i5994) {
 		int depth = audioFrame->GetSampleFrameCount();
@@ -1457,6 +1510,8 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 			}
 		} else {
 
+			BMDTimecodeFlags tcflags = 0;
+
 			frameTime->frameCount++;
 
 			g_no_signal = 0;
@@ -1464,12 +1519,11 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 			DECKLINK_STR timecodeStringTmp = NULL;
 			if (g_timecodeFormat != 0) {
 				IDeckLinkTimecode *timecode;
-				if (videoFrame->
-				    GetTimecode(g_timecodeFormat,
-						&timecode) == S_OK) {
+				if (videoFrame->GetTimecode(g_timecodeFormat, &timecode) == S_OK) {
 					timecode->GetString(&timecodeStringTmp);
 					timecodeString = DECKLINK_STRDUP(timecodeStringTmp);
 					DECKLINK_FREE(timecodeStringTmp);
+					tcflags = timecode->GetFlags();
 				}
 			}
 
@@ -1520,12 +1574,13 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 
 			if (g_verbose > 1) {
 				fprintf(stdout,
-					"Frame received (#%10llu) [%s] - %s - Size: %li bytes (%7.2f ms) [remoteFrame: %d] ",
+					"Frame received (#%10llu) [%s][%c%c%c] - %s - Size: %li bytes (%7.2f ms) [remoteFrame: %d] ",
 					frameTime->frameCount,
-					timecodeString !=
-					NULL ? timecodeString : "No timecode",
-					rightEyeFrame !=
-					NULL ? "Valid Frame (3D left/right)" :
+					timecodeString != NULL ? timecodeString : "No timecode",
+					tcflags & bmdTimecodeIsDropFrame ? 'D' : '-',
+					tcflags & bmdTimecodeFieldMark ? 'F' : '-',
+					tcflags & bmdTimecodeColorFrame ? 'C' : '-',
+					rightEyeFrame != NULL ? "Valid Frame (3D left/right)" :
 					"Valid Frame",
 					videoFrame->GetRowBytes() *
 					videoFrame->GetHeight(), interval, currRFC);
@@ -2011,6 +2066,7 @@ static int usage(const char *progname, int status)
 		"         0:   8 bit YUV (4:2:2)\n"
 		"         1:  10 bit YUV (4:2:2) (def)\n"
 		"         2:  10 bit RGB (4:4:4)\n"
+		"    -C Print all frame timecodes found, and nothing else\n"
 		"    -t <format> Print timecode\n"
 		"        rp188:  RP 188\n"
 		"         vitc:  VITC\n"
@@ -2149,7 +2205,7 @@ static int _main(int argc, char *argv[])
 	memset(&g_asctx, 0, sizeof(g_asctx));
 
 	int v;
-	while ((ch = getopt(argc, argv, "?h39c:s:f:a:A:Bm:n:p:t:vV:HI:i:K:l:LP:MNSx:X:R:e:T:Y:Z:k")) != -1) {
+	while ((ch = getopt(argc, argv, "?h39c:Cs:f:a:A:Bm:n:p:t:vV:HI:i:K:l:LP:MNSx:X:R:e:T:Y:Z:k")) != -1) {
 		switch (ch) {
 		case '9':
 			g_1080i2997_cadence_check = 1;
@@ -2192,6 +2248,9 @@ static int _main(int argc, char *argv[])
 				fprintf(stderr, "Only valid types to exclude are video/audio/data\n");
 				goto bail;
 			}
+			break;
+		case 'C':
+			g_print_all_timecodes = 1;
 			break;
 		case 'c':
 			g_audioChannels = atoi(optarg);
