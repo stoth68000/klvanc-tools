@@ -4,7 +4,9 @@
 #include <stdlib.h>
 #include "font8x8_basic.h"
 
-#define V210_BOX_HEIGHT 30 /* must be a multiple of six (represents pixel width of each box drawn ) */
+/* must be a multiple of six (represents pixel width of each box drawn ) */
+#define V210_BOX_HEIGHT_SD 18
+#define V210_BOX_HEIGHT_HD 30
 
 static void compute_colorbar_10bit_array(const uint32_t uyvy, uint8_t *bar10)
 {
@@ -42,9 +44,10 @@ static int v210_burn_char(unsigned char *frame,
 	uint8_t line;
 	uint8_t bar10_fg[16];
 	uint8_t bar10_bg[16];
-	int plotctrl = 8;
-	int plotwidth = 4 * plotctrl;
-	int plotheight = 8 * plotctrl;
+	int plotwidth, plotheight;
+	int plotctrl = stride < 3456 ? 4 : 8;
+	plotwidth = 4 * plotctrl;
+	plotheight = 8 * plotctrl;
 
 	unsigned char fg[2];
 	unsigned char bg[2];
@@ -140,9 +143,9 @@ uint32_t V210_black[] = {
 
 
 /* KL paint 6 pixels in a single point */
-__inline__ void V210_draw_6_pixels(uint32_t *addr, uint32_t *coloring)
+__inline__ void V210_draw_6_pixels(uint32_t *addr, uint32_t *coloring, int boxsize)
 {
-	for (int i = 0; i < (V210_BOX_HEIGHT / 6); i++) {
+	for (int i = 0; i < (boxsize / 6); i++) {
 		addr[0] = coloring[0];
 		addr[1] = coloring[1];
 		addr[2] = coloring[2];
@@ -153,6 +156,7 @@ __inline__ void V210_draw_6_pixels(uint32_t *addr, uint32_t *coloring)
 
 void V210_draw_box(uint32_t *frame_addr, uint32_t stride, int color, int interlaced)
 {
+	int boxsize = stride < 3456 ? V210_BOX_HEIGHT_SD : V210_BOX_HEIGHT_HD;
 	uint32_t *coloring;
 	if (color == 1)
 		coloring = V210_white;
@@ -161,9 +165,9 @@ void V210_draw_box(uint32_t *frame_addr, uint32_t stride, int color, int interla
 
 	int interleaved = interlaced ? 2 : 1;
 	interleaved = 1;
-	for (uint32_t l = 0; l < V210_BOX_HEIGHT; l++) {
+	for (uint32_t l = 0; l < boxsize; l++) {
 		uint32_t *addr = frame_addr + ((l * interleaved) * (stride / 4));
-		V210_draw_6_pixels(addr, coloring);
+		V210_draw_6_pixels(addr, coloring, boxsize);
 	}
 }
 
@@ -176,15 +180,17 @@ __inline__ void V210_draw_box_at(uint32_t *frame_addr, uint32_t stride, int colo
 
 void V210_write_32bit_value(void *frame_bytes, uint32_t stride, uint32_t value, uint32_t lineNr, int interlaced)
 {
+	int boxsize = stride < 3456 ? V210_BOX_HEIGHT_SD : V210_BOX_HEIGHT_HD;
 	for (int p = 31, sh = 0; p >= 0; p--, sh++) {
 		V210_draw_box_at(((uint32_t *)frame_bytes), stride,
-			(value & (1 << sh)) == (uint32_t)(1 << sh), p * V210_BOX_HEIGHT, lineNr, interlaced);
+			(value & (1 << sh)) == (uint32_t)(1 << sh), p * boxsize, lineNr, interlaced);
 	}
 }
 
 uint32_t V210_read_32bit_value(void *frame_bytes, uint32_t stride, uint32_t lineNr, double scalefactor)
 {
-	double pixheight = V210_BOX_HEIGHT * scalefactor;
+	int boxsize = stride < 3456 ? V210_BOX_HEIGHT_SD : V210_BOX_HEIGHT_HD;
+	double pixheight = boxsize * scalefactor;
 	double newlinenr = lineNr * scalefactor;
 
 	int xpos = 0;
