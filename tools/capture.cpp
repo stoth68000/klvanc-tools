@@ -1636,20 +1636,22 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 		unsigned char *pixelData;
 		videoFrame->GetBytes((void **)&pixelData);
 
-		static uint32_t xxx = 0;
-		lastGoodKLOsdCounter = V210_read_32bit_value(pixelData, stride, 1, 1);
-		if (xxx + 1 != lastGoodKLOsdCounter) {
-                        char t[160];
-			time_t now = time(0);
-                        sprintf(t, "%s", ctime(&now));
-                        t[strlen(t) - 1] = 0;
+		if (g_kl_osd_vanc_compare) {
+			static uint32_t xxx = 0;
+			lastGoodKLOsdCounter = V210_read_32bit_value(pixelData, stride, 10, 1);
+			if (xxx + 1 != lastGoodKLOsdCounter) {
+				char t[160];
+				time_t now = time(0);
+				sprintf(t, "%s", ctime(&now));
+				t[strlen(t) - 1] = 0;
+				if (!g_monitor_mode)
+					fprintf(stderr, "%s: KL OSD counter discontinuity, expected %08" PRIx32 " got %08" PRIx32 "\n", t, xxx + 1, lastGoodKLOsdCounter);
+			}
 			if (!g_monitor_mode)
-				fprintf(stderr, "%s: KL OSD counter discontinuity, expected %08" PRIx32 " got %08" PRIx32 "\n", t, xxx + 1, lastGoodKLOsdCounter);
+				fprintf(stderr, "video counter=%d vanc counter=%d delta=%d\n", lastGoodKLOsdCounter,
+					lastGoodKLFrameCounter, lastGoodKLOsdCounter - lastGoodKLFrameCounter);
+			xxx = lastGoodKLOsdCounter;
 		}
-		if (!g_monitor_mode)
-			fprintf(stderr, "video counter=%d vanc counter=%d delta=%d\n", lastGoodKLOsdCounter,
-				lastGoodKLFrameCounter, lastGoodKLOsdCounter - lastGoodKLFrameCounter);
-		xxx = lastGoodKLOsdCounter;
 	}
 
 

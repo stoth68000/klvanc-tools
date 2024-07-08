@@ -52,7 +52,7 @@
 pthread_mutex_t			sleepMutex;
 pthread_cond_t			sleepCond;
 bool				do_exit = false;
-
+int                             frameWidth;
 const unsigned long		kAudioWaterlevel = 48000;
 
 pthread_t vancmenus_threadId;
@@ -84,7 +84,10 @@ static int write_vanc_msg(uint8_t *dst, const uint16_t *msg, uint16_t msgWordLen
 {
 	int v210_len;
 
-	klvanc_y10_to_v210((uint16_t *) msg, dst, msgWordLength);
+        if (frameWidth > 720)
+		klvanc_y10_to_v210((uint16_t *) msg, dst, msgWordLength);
+        else
+		klvanc_uyvy_to_v210((uint16_t *) msg, dst, msgWordLength);
 
 	/* Figure out the actual size of the resulting v210 buffer */
 	v210_len = msgWordLength / 6;
@@ -404,6 +407,7 @@ void TestPattern::StartRunning()
 	unsigned long			audioSamplesPerFrame;
 
 	m_frameWidth = m_displayMode->GetWidth();
+	frameWidth = m_frameWidth;
 	m_frameHeight = m_displayMode->GetHeight();
 	m_displayMode->GetFrameRate(&m_frameDuration, &m_frameTimescale);
 
