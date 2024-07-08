@@ -1638,7 +1638,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 
 		if (g_kl_osd_vanc_compare) {
 			static uint32_t xxx = 0;
-			lastGoodKLOsdCounter = V210_read_32bit_value(pixelData, stride, 1, 1);
+			lastGoodKLOsdCounter = V210_read_32bit_value(pixelData, stride, 10, 1);
 			if (xxx + 1 != lastGoodKLOsdCounter) {
 				char t[160];
 				time_t now = time(0);
